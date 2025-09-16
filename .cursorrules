@@ -1,0 +1,151 @@
+# Canton Wallet Demo - Cursor Rules
+
+## Project Context
+
+This is a Canton Network wallet demo application built with React, Vite, and the Canton Wallet SDK. The project demonstrates creating external wallets and minting tokens on the Canton Network.
+
+## Code Style and Conventions
+
+### JavaScript/React
+
+- Use ES6+ features and modern React patterns (hooks, functional components)
+- Prefer async/await over promises for better readability
+- Use descriptive variable names that reflect Canton domain concepts (party, synchronizer, validator)
+- Handle errors gracefully with try-catch blocks and user-friendly error messages
+
+### Canton SDK Integration
+
+- Always initialize the SDK before any operations
+- Use the service layer pattern (cantonService.js) to encapsulate Canton operations
+- Follow the prepare-sign-submit pattern for transactions
+- Maintain proper state management for keyPair, partyId, and SDK instance
+
+### Testing
+
+- Write comprehensive tests covering happy paths and error scenarios
+- Mock Canton SDK interactions for unit tests
+- Use integration tests sparingly, only when LocalNet is available
+- Focus on user interactions and critical business logic
+
+## File Structure
+
+```text
+src/
+├── App.jsx          # Main UI component
+├── cantonService.js # Canton SDK service layer
+├── config.js        # Configuration for network endpoints
+├── test/
+│   ├── setup.js              # Test configuration
+│   ├── cantonService.test.js # Service unit tests
+│   ├── errorHandling.test.js # Error scenario tests
+│   ├── App.test.jsx          # UI component tests
+│   └── integration.test.js   # Integration tests
+```
+
+## Key Patterns
+
+### Canton Operations Pattern
+
+```javascript
+// 1. Check prerequisites
+if (!this.partyId) {
+  throw new Error('No wallet created yet');
+}
+
+// 2. Prepare command
+const prepareResponse = await this.sdk.userLedger?.prepareSubmission(command);
+
+// 3. Sign transaction
+const signedHash = signTransactionHash(
+  prepareResponse.preparedTransactionHash,
+  this.keyPair.privateKey
+);
+
+// 4. Submit transaction
+const result = await this.sdk.userLedger?.executeSubmission(
+  prepareResponse,
+  signedHash,
+  this.keyPair.publicKey,
+  uuidv4()
+);
+```
+
+### Error Handling Pattern
+
+```javascript
+try {
+  setLoading(true);
+  setError('');
+  setSuccess('');
+  
+  const result = await cantonService.someOperation();
+  setSuccess('Operation completed successfully');
+  
+} catch (err) {
+  setError(`Failed to perform operation: ${err.message}`);
+} finally {
+  setLoading(false);
+}
+```
+
+## Configuration
+
+### LocalNet Ports (from docker-compose)
+
+- App User Ledger API: 2901
+- App User Admin API: 2902
+- App User Validator API: 2903
+- App User JSON API: 2975
+- App User UI: 2000
+
+### Environment Variables
+
+- `RUN_INTEGRATION_TESTS`: Set to 'true' to run integration tests
+- LocalNet must be running at specified ports
+
+## Testing Guidelines
+
+### Unit Tests
+
+- Mock all external dependencies
+- Test both success and failure scenarios
+- Verify state changes and side effects
+- Use descriptive test names that explain the scenario
+
+### Integration Tests
+
+- Only run when LocalNet is available
+- Test complete user workflows
+- Verify actual network operations
+- Handle timeouts appropriately (30s default)
+
+### UI Tests
+
+- Test user interactions with React Testing Library
+- Verify progressive disclosure of features
+- Test form validation and error states
+- Ensure loading states are handled
+
+## Common Issues and Solutions
+
+1. **SDK Initialization**: Always check if SDK is initialized before operations
+2. **Party Management**: Store keyPair securely, never expose private keys
+3. **Transaction Signing**: Use Buffer for proper encoding of transaction hashes
+4. **Network Timeouts**: Implement proper timeout handling (30s for most operations)
+5. **State Consistency**: Maintain consistent state between service and UI layers
+
+## Code Review Checklist
+
+- [ ] Error handling is comprehensive
+- [ ] Loading states are shown during async operations
+- [ ] Success/error messages are user-friendly
+- [ ] Tests cover the new functionality
+- [ ] Canton SDK best practices are followed
+- [ ] Configuration is environment-appropriate
+- [ ] No sensitive data is logged or exposed
+
+## Resources
+
+- Canton SDK Documentation: <https://docs.digitalasset.com/integrate/devnet/index.html>
+- LocalNet Setup: /Users/e/code/sbc/canton/localnet/splice-node/docker-compose/localnet
+- Token Standard: <https://docs.dev.sync.global/app_dev/token_standard/index.html>
