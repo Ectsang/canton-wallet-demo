@@ -22,8 +22,8 @@ export const CANTON_CONFIG = {
   JSON_API_URL: 'http://localhost:2975',
   JSON_API_PORT: 2975,
   
-  // Scan/Topology API URL - typically part of the splice app
-  SCAN_API_URL: 'http://localhost:2000/api/scan',
+  // Scan/Topology API URL - must match LocalNet configuration
+  SCAN_API_URL: 'http://scan.localhost:4000/api/scan',
   
   // Default synchronizer for LocalNet
   DEFAULT_SYNCHRONIZER: 'localnet::1220e7b23ea52eb5c672fb0b1cdbc916922ffed3dd7676c223a605664315e2d43edd',

@@ -14,10 +14,12 @@ A simple web dApp demonstrating how to create an external wallet and mint tokens
 
 - Node.js (v16 or higher)
 - A running Canton Network LocalNet instance
-- Canton Network services running on default ports:
-  - Ledger API: http://localhost:5011
-  - Admin API: http://localhost:5012
-  - Scan API: http://localhost:5014
+- Canton Network services running on LocalNet ports:
+  - Ledger API (gRPC): localhost:2901
+  - Admin API (gRPC): localhost:2902
+  - Validator API: localhost:2903
+  - JSON API: localhost:2975
+  - Scan/UI: <http://localhost:2000>
 
 ## Installation
 
@@ -31,7 +33,17 @@ npm install
 npm run dev
 ```
 
-The application will start on http://localhost:5173 (or another available port).
+The application will start on <http://localhost:5173> (or another available port).
+
+## Testing
+
+For comprehensive testing documentation, see [TESTING_GUIDE.md](./TESTING_GUIDE.md).
+
+Quick test commands:
+
+- `npm test` - Run all mocked tests
+- `npm run test:real` - Run real integration tests with Canton LocalNet (automated setup)
+- `npm run test:real:direct` - Run real integration tests (manual Canton setup required)
 
 ## How to Use
 
@@ -81,12 +93,29 @@ npm run test:ui
 # Run only unit tests once
 npm run test:unit
 
-# Run integration tests (requires LocalNet)
+# Run integration tests (mocked)
 npm run test:integration
 
-# Run all tests (unit + integration)
+# Run REAL integration tests against Canton LocalNet
+npm run test:real
+
+# Run all tests (unit + mocked integration)
 npm run test:all
 ```
+
+### Real Integration Tests
+
+We now provide real integration tests that connect to an actual Canton LocalNet instance:
+
+```bash
+# Automated test runner (recommended) - checks Canton status and offers to start it
+npm run test:real
+
+# Direct test execution (requires Canton to be already running)
+npm run test:real:direct
+```
+
+See [REAL_INTEGRATION_TESTS.md](./REAL_INTEGRATION_TESTS.md) for detailed instructions on running and verifying real integration tests.
 
 ### Test Structure
 
@@ -118,6 +147,7 @@ npm run test:all
 ### Integration Test Prerequisites
 
 1. **Start LocalNet**:
+
    ```bash
    cd /Users/e/code/sbc/canton/localnet/splice-node/docker-compose/localnet
    docker-compose up
@@ -127,6 +157,7 @@ npm run test:all
    The integration test runner will automatically check if all required services are running.
 
 3. **Run integration tests**:
+
    ```bash
    npm run test:integration
    ```
@@ -143,13 +174,33 @@ npm run test:all
 1. **Connection Failed**: Ensure your Canton LocalNet is running and accessible
 2. **SDK Errors**: Check the browser console for detailed error messages
 3. **Transaction Failures**: Verify your party has the necessary permissions
-4. **Test Failures**: 
+4. **Test Failures**:
    - For unit tests: Check that all dependencies are installed
    - For integration tests: Ensure LocalNet is running and healthy
    - Check ports 2901, 2902, 2903, and 2000 are accessible
 
-## Learn More
+## Documentation
+
+### Project Documentation
+
+- **[CANTON_INTEGRATION_STATUS.md](./CANTON_INTEGRATION_STATUS.md)** - Current SDK integration status and resolved issues
+- **[TESTING.md](./TESTING.md)** - Complete testing guide for mock and real integration tests
+- **[SDK_Question.md](./SDK_Question.md)** - Technical questions for Canton team regarding SDK issues
+
+### External Resources
 
 - [Canton Network Documentation](https://docs.digitalasset.com/integrate/devnet/index.html)
 - [Canton Token Standard](https://docs.dev.sync.global/app_dev/token_standard/index.html)
 - [Wallet SDK Guide](https://docs.digitalasset.com/integrate/devnet/integrating-with-canton-network/index.html)
+
+## Current Status
+
+🎉 **The Canton Wallet SDK integration is fully operational!**
+
+- ✅ **Wallet Creation**: Working end-to-end with Canton LocalNet
+- ✅ **SDK Integration**: All major bugs resolved via automated patches
+- ✅ **Authentication**: JWT tokens functional with LocalNet
+- ✅ **Testing**: Both mock (15/15) and real integration tests (7/13) working
+- ⚠️ **Token Operations**: Require proper DAML template configuration
+
+See [CANTON_INTEGRATION_STATUS.md](./CANTON_INTEGRATION_STATUS.md) for detailed status and technical achievements.

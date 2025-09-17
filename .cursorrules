@@ -4,148 +4,138 @@
 
 This is a Canton Network wallet demo application built with React, Vite, and the Canton Wallet SDK. The project demonstrates creating external wallets and minting tokens on the Canton Network.
 
+### Important SDK Issue
+
+**The Canton Wallet SDK v0.5.0 has a bug that prevents real LocalNet integration.** See `SDK_BUG_NOTES.md` for details. Integration tests currently use a mock service instead of connecting to real LocalNet.
+
 ## Code Style and Conventions
 
 ### JavaScript/React
 
 - Use ES6+ features and modern React patterns (hooks, functional components)
-- Prefer async/await over promises for better readability
-- Use descriptive variable names that reflect Canton domain concepts (party, synchronizer, validator)
-- Handle errors gracefully with try-catch blocks and user-friendly error messages
-
-### Canton SDK Integration
-
-- Always initialize the SDK before any operations
-- Use the service layer pattern (cantonService.js) to encapsulate Canton operations
-- Follow the prepare-sign-submit pattern for transactions
-- Maintain proper state management for keyPair, partyId, and SDK instance
+- Prefer const over let, avoid var
+- Use async/await over promises where possible
+- Handle errors explicitly with try/catch blocks
+- Use descriptive variable names (e.g., `walletInfo` not `wi`)
 
 ### Testing
 
-- Write comprehensive tests covering happy paths and error scenarios
-- Mock Canton SDK interactions for unit tests
-- Use integration tests sparingly, only when LocalNet is available
-- Focus on user interactions and critical business logic
+- Write tests for all critical functionality
+- Use descriptive test names that explain the scenario
+- Mock external dependencies in unit tests
+- Integration tests use mock service until SDK bug is fixed
+- Aim for high code coverage but prioritize meaningful tests
 
-## File Structure
+### Canton SDK Integration
 
-```text
-src/
-├── App.jsx          # Main UI component
-├── cantonService.js # Canton SDK service layer
-├── config.js        # Configuration for network endpoints
-├── test/
-│   ├── setup.js              # Test configuration
-│   ├── cantonService.test.js # Service unit tests
-│   ├── errorHandling.test.js # Error scenario tests
-│   ├── App.test.jsx          # UI component tests
-│   └── integration.test.js   # Integration tests
+- Always initialize SDK before using other methods
+- Handle authentication properly (unsafe auth for LocalNet)
+- Use the prepare-sign-submit pattern for transactions
+- Store party IDs after wallet creation
+- Check for wallet existence before token operations
+
+## Project Structure
+
+```
+canton-wallet-demo/
+├── src/
+│   ├── App.jsx              # Main React component
+│   ├── cantonService.js     # Canton SDK service layer
+│   ├── config.js            # Configuration for LocalNet
+│   └── test/
+│       ├── *.test.js        # Unit tests
+│       ├── integration.test.js # Integration tests
+│       └── mockCantonService.js # Mock service for testing
+├── SDK_BUG_NOTES.md         # Documentation of SDK bug
+└── README.md                # Project documentation
 ```
 
-## Key Patterns
+## LocalNet Configuration
 
-### Canton Operations Pattern
+LocalNet runs on these ports:
+- Ledger API: 2901
+- Admin API: 2902
+- Validator API: 2903
+- JSON API: 2975
+- Scan API: 2000
 
-```javascript
-// 1. Check prerequisites
-if (!this.partyId) {
-  throw new Error('No wallet created yet');
-}
-
-// 2. Prepare command
-const prepareResponse = await this.sdk.userLedger?.prepareSubmission(command);
-
-// 3. Sign transaction
-const signedHash = signTransactionHash(
-  prepareResponse.preparedTransactionHash,
-  this.keyPair.privateKey
-);
-
-// 4. Submit transaction
-const result = await this.sdk.userLedger?.executeSubmission(
-  prepareResponse,
-  signedHash,
-  this.keyPair.publicKey,
-  uuidv4()
-);
-```
-
-### Error Handling Pattern
-
-```javascript
-try {
-  setLoading(true);
-  setError('');
-  setSuccess('');
-  
-  const result = await cantonService.someOperation();
-  setSuccess('Operation completed successfully');
-  
-} catch (err) {
-  setError(`Failed to perform operation: ${err.message}`);
-} finally {
-  setLoading(false);
-}
-```
-
-## Configuration
-
-### LocalNet Ports (from docker-compose)
-
-- App User Ledger API: 2901
-- App User Admin API: 2902
-- App User Validator API: 2903
-- App User JSON API: 2975
-- App User UI: 2000
-
-### Environment Variables
-
-- `RUN_INTEGRATION_TESTS`: Set to 'true' to run integration tests
-- LocalNet must be running at specified ports
-
-## Testing Guidelines
+## Testing Strategy
 
 ### Unit Tests
-
-- Mock all external dependencies
-- Test both success and failure scenarios
-- Verify state changes and side effects
-- Use descriptive test names that explain the scenario
+- Test individual components and services
+- Mock all Canton SDK dependencies
+- Focus on business logic and error handling
 
 ### Integration Tests
-
-- Only run when LocalNet is available
+- Currently use mock service due to SDK bug
 - Test complete user workflows
-- Verify actual network operations
-- Handle timeouts appropriately (30s default)
+- Will switch to real LocalNet once SDK is fixed
 
-### UI Tests
+### Running Tests
+```bash
+npm test              # Run all tests
+npm run test:unit    # Unit tests only
+npm run test:integration # Integration tests (with mock)
+```
 
-- Test user interactions with React Testing Library
-- Verify progressive disclosure of features
-- Test form validation and error states
-- Ensure loading states are handled
+## Common Patterns
 
-## Common Issues and Solutions
+### Creating an External Wallet
+```javascript
+const keyPair = createKeyPair();
+const preparedParty = await sdk.topology.prepareExternalPartyTopology(
+  keyPair.publicKey,  // SDK expects base64 string
+  partyHint
+);
+// Sign and submit...
+```
 
-1. **SDK Initialization**: Always check if SDK is initialized before operations
-2. **Party Management**: Store keyPair securely, never expose private keys
-3. **Transaction Signing**: Use Buffer for proper encoding of transaction hashes
-4. **Network Timeouts**: Implement proper timeout handling (30s for most operations)
-5. **State Consistency**: Maintain consistent state between service and UI layers
+### Error Handling
+```javascript
+try {
+  const result = await cantonService.createToken(...);
+  // Handle success
+} catch (error) {
+  console.error('Operation failed:', error);
+  // Show user-friendly error message
+}
+```
+
+## Development Workflow
+
+1. Make changes to code
+2. Run unit tests to verify functionality
+3. Run integration tests (currently with mock)
+4. Test manually with UI if needed
+5. Ensure all tests pass before committing
+
+## Known Issues and Workarounds
+
+1. **SDK Bug**: `prepareExternalPartyTopology` fails with LocalNet
+   - Workaround: Use mock service for testing
+   - See SDK_BUG_NOTES.md for details
+
+2. **Buffer in Browser**: Need polyfill for browser environment
+   - Already configured in index.html
+
+3. **Authentication**: LocalNet uses unsafe auth
+   - Token: 'unsafe'
+   - User: 'ledger-api-user'
+
+## Future Improvements
+
+Once SDK bug is fixed:
+1. Remove mock service workaround
+2. Update integration tests to use real LocalNet
+3. Add more comprehensive end-to-end tests
+4. Consider adding performance tests
 
 ## Code Review Checklist
 
+- [ ] All tests pass
 - [ ] Error handling is comprehensive
-- [ ] Loading states are shown during async operations
-- [ ] Success/error messages are user-friendly
-- [ ] Tests cover the new functionality
-- [ ] Canton SDK best practices are followed
-- [ ] Configuration is environment-appropriate
-- [ ] No sensitive data is logged or exposed
-
-## Resources
-
-- Canton SDK Documentation: <https://docs.digitalasset.com/integrate/devnet/index.html>
-- LocalNet Setup: /Users/e/code/sbc/canton/localnet/splice-node/docker-compose/localnet
-- Token Standard: <https://docs.dev.sync.global/app_dev/token_standard/index.html>
+- [ ] No hardcoded values (use config)
+- [ ] Code follows project conventions
+- [ ] Documentation is updated if needed
+- [ ] No console.log statements in production code
+- [ ] Async operations have proper error handling

@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import App from '../App';
-import cantonService from '../cantonService';
+import App from '../../../App';
+import cantonService from '../../../cantonService';
 
 // Mock the canton service
-vi.mock('../cantonService', () => ({
+vi.mock('../../../cantonService', () => ({
   default: {
     initialize: vi.fn(),
     connectToNetwork: vi.fn(),

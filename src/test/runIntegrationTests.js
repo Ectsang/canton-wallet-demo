@@ -13,33 +13,71 @@
 
 import { spawn } from 'child_process';
 import fetch from 'node-fetch';
+import { createConnection } from 'net';
 
 // Configuration based on LocalNet ports
 const HEALTH_CHECK_ENDPOINTS = [
-  { name: 'App User Ledger API', url: 'http://localhost:2901/health' },
-  { name: 'App User Admin API', url: 'http://localhost:2902/health' },
-  { name: 'App User Validator API', url: 'http://localhost:2903/health' },
-  { name: 'App User UI', url: 'http://localhost:2000' },
+  { name: 'App User Ledger API', port: 2901, type: 'grpc' },
+  { name: 'App User Admin API', port: 2902, type: 'grpc' },
+  { name: 'App User Validator API', port: 2903, type: 'grpc' },
+  { name: 'App User UI', url: 'http://localhost:2000', type: 'http' },
 ];
 
 async function checkEndpoint(endpoint) {
-  try {
-    const response = await fetch(endpoint.url, { 
-      timeout: 5000,
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
+  if (endpoint.type === 'http') {
+    // HTTP endpoint check (for UI)
+    try {
+      const response = await fetch(endpoint.url, { 
+        timeout: 5000,
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      return { 
+        name: endpoint.name, 
+        success: response.ok,
+        status: response.status 
+      };
+    } catch (error) {
+      return { 
+        name: endpoint.name, 
+        success: false, 
+        error: error.message 
+      };
+    }
+  } else {
+    // gRPC endpoint check (for Canton services)
+    return new Promise((resolve) => {
+      const connection = createConnection(endpoint.port, 'localhost');
+      
+      const timeout = setTimeout(() => {
+        connection.destroy();
+        resolve({
+          name: endpoint.name,
+          success: false,
+          error: 'Connection timeout'
+        });
+      }, 5000);
+      
+      connection.on('connect', () => {
+        clearTimeout(timeout);
+        connection.end();
+        resolve({
+          name: endpoint.name,
+          success: true,
+          status: 'Connected'
+        });
+      });
+      
+      connection.on('error', (error) => {
+        clearTimeout(timeout);
+        resolve({
+          name: endpoint.name,
+          success: false,
+          error: error.message
+        });
+      });
     });
-    return { 
-      name: endpoint.name, 
-      success: response.ok,
-      status: response.status 
-    };
-  } catch (error) {
-    return { 
-      name: endpoint.name, 
-      success: false, 
-      error: error.message 
-    };
   }
 }
 
@@ -54,7 +92,7 @@ async function checkLocalNetHealth() {
   
   results.forEach(result => {
     if (result.success) {
-      console.log(`✅ ${result.name}: OK`);
+      console.log(`✅ ${result.name}: OK (Status: ${result.status})`);
     } else {
       console.log(`❌ ${result.name}: FAILED (${result.error || `Status: ${result.status}`})`);
       allHealthy = false;
@@ -75,7 +113,9 @@ async function runIntegrationTests() {
     console.error('\n❌ LocalNet is not fully operational!');
     console.error('\nPlease ensure LocalNet is running:');
     console.error('  cd /Users/e/code/sbc/canton/localnet/splice-node/docker-compose/localnet');
-    console.error('  docker-compose up\n');
+    console.error('  docker-compose up');
+    console.error('\nWait for all services to be healthy before running integration tests.');
+    console.error('You can check the logs with: docker-compose logs -f\n');
     process.exit(1);
   }
   
@@ -87,7 +127,8 @@ async function runIntegrationTests() {
     env: { 
       ...process.env, 
       RUN_INTEGRATION_TESTS: 'true',
-      NODE_ENV: 'test'
+      NODE_ENV: 'test',
+      UNSAFE_SECRET: 'test-secret-for-localnet-development-only'
     },
     stdio: 'inherit'
   });

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
@@ -17,13 +17,16 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    setupFiles: './src/test/setup.browser.js',
+    setupFiles: './src/test/setup/unit.setup.js',
+    include: [
+      'src/test/unit/**/*.{test,spec}.{js,jsx,ts,tsx}'
+    ],
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
       '**/cypress/**',
       '**/.{idea,git,cache,output,temp}/**',
-      '**/src/test/realIntegration.test.js', // Exclude real integration tests from regular runs
+      '**/src/test/integration/**', // Exclude integration tests
     ],
     coverage: {
       reporter: ['text', 'json', 'html'],
