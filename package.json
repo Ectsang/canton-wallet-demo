@@ -25,7 +25,8 @@
     "verify:full": "npm run test:all:real && npm run build",
     "postinstall": "node scripts/patch-canton-sdk.js",
     "server:dev": "nodemon --watch server --ext js --exec node server/index.js",
-    "server:start": "node server/index.js"
+    "server:start": "node server/index.js",
+    "server:stop": "bash -lc 'lsof -ti :8899 -sTCP:LISTEN -n -P | xargs -I{} kill -9 {} 2>/dev/null || true; pkill -f \"server/index.js\" || true; pkill -f \"nodemon --watch server\" || true'"
   },
   "keywords": [],
   "author": "",
