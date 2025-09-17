@@ -17,9 +17,7 @@ import {
 describe('CantonService', () => {
   beforeEach(() => {
     // Reset the service state before each test
-    cantonService.sdk = null;
-    cantonService.keyPair = null;
-    cantonService.partyId = null;
+    cantonService.resetState();
     
     // Reset all mocks using the centralized function
     resetAllMocks();

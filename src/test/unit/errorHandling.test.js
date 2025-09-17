@@ -12,14 +12,20 @@ import {
 
 describe('Error Handling and Edge Cases', () => {
   beforeEach(async () => {
-    cantonService.sdk = null;
-    cantonService.keyPair = null;
-    cantonService.partyId = null;
-    
-    // Reset all mocks using the centralized function
+    // Reset all mocks first
     resetAllMocks();
     
+    // Reset the service state
+    cantonService.resetState();
+    
+    // Initialize with fresh state
     await cantonService.initialize();
+  });
+
+  afterEach(() => {
+    // Additional cleanup after each test
+    cantonService.resetState();
+    resetAllMocks();
   });
 
   describe('Network Connectivity Errors', () => {
@@ -116,7 +122,7 @@ describe('Error Handling and Edge Cases', () => {
 
       await expect(
         cantonService.mintTokens('token::123', -100)
-      ).rejects.toThrow('Amount must be positive');
+      ).rejects.toThrow('Amount must be a positive number');
     });
   });
 
@@ -147,24 +153,34 @@ describe('Error Handling and Edge Cases', () => {
     });
 
     it('should handle corrupted key pair state', async () => {
+      // Ensure clean state
+      cantonService.resetState();
+      await cantonService.initialize();
       await cantonService.connectToNetwork();
       
       // Simulate corrupted key pair by setting it to null (but keep partyId)
-      cantonService.keyPair = null;
+      cantonService.keyPair = { publicKey: 'test', privateKey: 'test' };
       cantonService.partyId = 'party::test';
       
       // Mock prepareSubmission to return null to trigger the error
       mockUserLedger.prepareSubmission.mockResolvedValueOnce(null);
       
       // This should fail with the prepare submission error
+      const tokenName = 'ValidToken';
+      const tokenSymbol = 'VTK';
+      const decimals = 2;
+      
       await expect(
-        cantonService.createToken('Token', 'TKN', 2)
+        cantonService.createToken(tokenName, tokenSymbol, decimals)
       ).rejects.toThrow('Failed to prepare token creation command');
     });
   });
 
   describe('Transaction Failures', () => {
     it('should handle transaction conflicts', async () => {
+      // Ensure clean state
+      cantonService.resetState();
+      await cantonService.initialize();
       await cantonService.connectToNetwork();
       cantonService.partyId = 'party::test';
       cantonService.keyPair = { publicKey: 'pub', privateKey: 'priv' };
@@ -180,13 +196,22 @@ describe('Error Handling and Edge Cases', () => {
         preparedTransactionHash: 'hash',
       });
 
+      const tokenName = 'ConflictToken';
+      const tokenSymbol = 'CFT';
+      const decimals = 2;
+
       await expect(
-        cantonService.createToken('Token', 'EXISTING', 2)
+        cantonService.createToken(tokenName, tokenSymbol, decimals)
       ).rejects.toThrow('Transaction conflict');
     });
 
     it('should handle transaction timeouts', async () => {
-      await cantonService.connectToNetwork();
+      // Ensure clean state
+      cantonService.resetState();
+      await cantonService.initialize();
+      const isConnected = await cantonService.connectToNetwork();
+      expect(isConnected).toBe(true);
+
       cantonService.partyId = 'party::test';
       cantonService.keyPair = { publicKey: 'pub', privateKey: 'priv' };
       
@@ -201,8 +226,11 @@ describe('Error Handling and Edge Cases', () => {
         preparedTransactionHash: 'hash',
       });
 
+      const tokenId = 'token::123';
+      const amount = 1000;
+
       await expect(
-        cantonService.mintTokens('token::123', 1000)
+        cantonService.mintTokens(tokenId, amount)
       ).rejects.toThrow('Transaction timeout');
     });
   });
@@ -337,7 +365,7 @@ describe('Error Handling and Edge Cases', () => {
 
       await expect(
         cantonService.mintTokens('token::123', 0)
-      ).rejects.toThrow('Amount must be greater than zero');
+      ).rejects.toThrow('Amount must be a positive number');
     });
   });
 

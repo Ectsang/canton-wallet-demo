@@ -45,17 +45,18 @@ export const MockWalletSDKImpl = vi.fn().mockImplementation(() => mockSDKInstanc
 
 // Helper function to reset all mocks
 export const resetAllMocks = () => {
+  // Reset all mocks including implementations and queued once results
   vi.clearAllMocks();
-  mockUserLedger.setPartyId.mockClear();
-  mockUserLedger.prepareSubmission.mockClear();
-  mockUserLedger.executeSubmission.mockClear();
-  mockTopology.prepareExternalPartyTopology.mockClear();
-  mockTopology.submitExternalPartyTopology.mockClear();
-  mockTokenStandard.setPartyId.mockClear();
-  mockTokenStandard.getBalance.mockClear();
-  mockTokenStandard.listTokens.mockClear();
-  mockTokenStandard.listHoldingUtxos.mockClear();
-  mockAdminLedger.setPartyId.mockClear();
+  mockUserLedger.setPartyId.mockReset();
+  mockUserLedger.prepareSubmission.mockReset();
+  mockUserLedger.executeSubmission.mockReset();
+  mockTopology.prepareExternalPartyTopology.mockReset();
+  mockTopology.submitExternalPartyTopology.mockReset();
+  mockTokenStandard.setPartyId.mockReset();
+  mockTokenStandard.getBalance.mockReset();
+  mockTokenStandard.listTokens.mockReset();
+  mockTokenStandard.listHoldingUtxos.mockReset();
+  mockAdminLedger.setPartyId.mockReset();
 };
 
 // Mock the entire Canton SDK module
