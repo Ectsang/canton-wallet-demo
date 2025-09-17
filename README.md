@@ -204,3 +204,32 @@ See [REAL_INTEGRATION_TESTS.md](./REAL_INTEGRATION_TESTS.md) for detailed instru
 - ⚠️ **Token Operations**: Require proper DAML template configuration
 
 See [CANTON_INTEGRATION_STATUS.md](./CANTON_INTEGRATION_STATUS.md) for detailed status and technical achievements.
+
+## Backend-for-Frontend (BFF)
+
+A Fastify server provides trusted access to the Canton SDK (Node-only) and exposes REST endpoints to the React app.
+
+- Location: `server/`
+- Port: 8899
+- Docs: `http://localhost:8899/docs`
+
+Setup:
+
+```bash
+cp .env.server.example .env.server
+npm run server:start
+```
+
+Health check:
+
+```bash
+curl -s http://localhost:8899/api/health
+```
+
+Initialize SDK connections (user, admin, topology):
+
+```bash
+curl -s -X POST http://localhost:8899/api/init -H 'content-type: application/json' -d '{}'
+```
+
+Do NOT commit `.env.server`; use the provided `.env.server.example` and set real values via secrets in CI/CD.

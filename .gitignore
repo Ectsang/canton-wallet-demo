@@ -1,3 +1,32 @@
+# Node
+node_modules/
+dist/
+.vite/
+
+# Env files (do not commit secrets)
+.env
+.env.*
+!.env.server.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Coverage / test outputs
+coverage/
+.nyc_output/
+
+# IDE/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Misc
+tmp/
+/tmp/
 # Dependencies
 node_modules/
 .pnp
