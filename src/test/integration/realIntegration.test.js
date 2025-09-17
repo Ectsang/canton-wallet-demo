@@ -30,12 +30,24 @@ describe('Real Canton Integration Tests', () => {
 
   describeReal('Canton LocalNet Real Integration', () => {
     beforeAll(async () => {
-      console.log('Starting real Canton integration tests...');
-      console.log('Canton LocalNet configuration:', getConfig());
+      console.log('🚀 Starting real Canton integration tests...');
+      console.log('📋 Canton LocalNet configuration:', getConfig());
       
-      // Check if Canton is reachable
-      console.log('Attempting to connect to Canton LocalNet...');
-      // Skip health check as it might not be available in this Canton version
+      // Perform comprehensive health check before running tests
+      console.log('🏥 Performing LocalNet health check...');
+      try {
+        await setupIntegrationTests();
+        console.log('✅ LocalNet health check passed - proceeding with integration tests');
+      } catch (error) {
+        console.error('❌ LocalNet health check failed:', error.message);
+        console.error('');
+        console.error('💡 To fix this issue:');
+        console.error('   1. Start LocalNet: canton -c examples/01-simple-topology/simple-topology.conf');
+        console.error('   2. Wait for services: node scripts/check-localnet.js --wait');
+        console.error('   3. Retry tests: npm run test:integration:real');
+        console.error('');
+        throw new Error('LocalNet is not healthy - aborting integration tests');
+      }
 
       // Initialize the service
       cantonService = CantonService;
@@ -343,29 +355,27 @@ describe('Real Canton Integration Tests', () => {
 
     describe('Canton Network Health Checks', () => {
       it('should verify Canton APIs are responsive', async () => {
-        const config = getConfig();
-        const endpoints = [
-          { name: 'Ledger API', url: `${config.LEDGER_API_URL}/v1/health` },
-          { name: 'Admin API', url: `${config.ADMIN_API_URL}/health` },
-        ];
+        console.log('\nChecking Canton API connectivity...');
         
-        console.log('\nChecking Canton API endpoints...');
-        
-        for (const endpoint of endpoints) {
-          try {
-            const response = await fetch(endpoint.url);
-            console.log(`${endpoint.name}: ${response.ok ? 'OK' : 'FAILED'} (${response.status})`);
-            
-            if (endpoint.name === 'Ledger API') {
-              expect(response.ok).toBe(true);
-            }
-          } catch (error) {
-            console.log(`${endpoint.name}: ERROR - ${error.message}`);
-            
-            if (endpoint.name === 'Ledger API') {
-              throw error;
-            }
-          }
+        // Instead of trying to make HTTP requests to gRPC endpoints,
+        // we'll verify that our SDK connections are working
+        try {
+          // Test that we can make a simple query through the SDK
+          const tokens = await cantonService.listTokens();
+          console.log('Ledger API: OK (SDK connection working)');
+          expect(Array.isArray(tokens)).toBe(true);
+          
+          // Test that we have a valid party ID (indicates successful connection)
+          expect(cantonService.partyId).toBeTruthy();
+          console.log('Party management: OK (Party ID available)');
+          
+          // Test that token standard is available
+          expect(cantonService.sdk.tokenStandard).toBeTruthy();
+          console.log('Token Standard: OK (Available)');
+          
+        } catch (error) {
+          console.error('Canton API connectivity test failed:', error);
+          throw error;
         }
       }, testTimeout);
     });

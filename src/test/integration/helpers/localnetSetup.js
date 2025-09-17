@@ -129,16 +129,56 @@ export async function waitForLocalNet(maxRetries = 10, retryDelay = 2000) {
  * Setup function to be called before integration tests
  */
 export async function setupIntegrationTests() {
+  console.info('🚀 Setting up integration tests...');
+  
   const isHealthy = await checkLocalNetHealth();
   
   if (!isHealthy) {
-    throw new Error(
-      'LocalNet is not healthy. Please start LocalNet before running integration tests:\n' +
-      'cd localnet && docker-compose up -d'
-    );
+    console.error('❌ LocalNet is not available for integration tests');
+    console.error('');
+    console.error('To start LocalNet, run:');
+    console.error('  canton -c examples/01-simple-topology/simple-topology.conf');
+    console.error('');
+    console.error('Or use the health check script:');
+    console.error('  node scripts/check-localnet.js --wait');
+    console.error('');
+    throw new Error('LocalNet is not healthy. Please start LocalNet before running integration tests.');
   }
   
+  console.info('✅ LocalNet is ready for integration tests');
   return true;
+}
+
+/**
+ * Validate LocalNet configuration for integration tests
+ */
+export async function validateLocalNetConfig() {
+  console.info('🔧 Validating LocalNet configuration...');
+  
+  const results = await Promise.all(
+    HEALTH_CHECK_ENDPOINTS.map(endpoint => checkEndpoint(endpoint))
+  );
+  
+  const issues = results.filter(result => result.status !== 'OK');
+  
+  if (issues.length > 0) {
+    console.warn('⚠️  LocalNet configuration issues detected:');
+    issues.forEach(issue => {
+      console.warn(`   - ${issue.name}: ${issue.status} (${issue.details})`);
+    });
+    
+    return {
+      isValid: false,
+      issues: issues.map(issue => ({
+        service: issue.name,
+        status: issue.status,
+        details: issue.details
+      }))
+    };
+  }
+  
+  console.info('✅ LocalNet configuration is valid');
+  return { isValid: true, issues: [] };
 }
 
 /**
