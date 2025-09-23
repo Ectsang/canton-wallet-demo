@@ -20,6 +20,8 @@ class CantonConsoleService {
     this.sdk = null;
     this.scanApiUrl = new URL("http://scan.localhost:4000/api/scan");
     this.isConnected = false;
+    // Real MinimalToken package ID deployed to Splice LocalNet
+    this.minimalTokenPackageId = 'd8325445c38031336b59afafaf5f01c83494e77884eab47baf3a6436e4be15f6';
   }
 
   /**
@@ -136,31 +138,67 @@ class CantonConsoleService {
         await this.initialize();
       }
 
-      console.log('🔄 Creating token with Canton SDK...', {
-        admin, name, symbol, decimals
+      console.log('🔄 Creating REAL Instrument contract with Canton SDK...', {
+        admin, name, symbol, decimals, packageId: this.minimalTokenPackageId
       });
 
-      // For now, we'll create a conceptual token since we need the MinimalToken DAR deployed
-      // In a real implementation, this would use sdk.userLedger.createCommand() with the proper template
-      const tokenId = `token-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      console.log('✅ Token concept created (DAR deployment needed for real contracts)');
+      // Create real DAML Instrument contract using deployed MinimalToken package
+      const templateId = {
+        packageId: this.minimalTokenPackageId,
+        moduleName: 'MinimalToken',
+        entityName: 'Instrument'
+      };
 
-      return {
-        contractId: tokenId,
+      const createArgs = {
         admin,
         name,
         symbol,
-        decimals,
-        transactionId: `tx-${Date.now()}`,
+        decimals: parseInt(decimals, 10)
+      };
+
+      console.log('📋 Creating Instrument contract:', { templateId, createArgs });
+
+      // Create the DAML command
+      const createCommand = {
+        templateId,
+        createArguments: createArgs
+      };
+
+      // Prepare submission with the create command
+      const preparedSubmission = await this.sdk.userLedger?.prepareSubmission([{
+        create: createCommand
+      }]);
+
+      if (!preparedSubmission) {
+        throw new Error('Failed to prepare submission for Instrument creation');
+      }
+
+      // Sign the transaction
+      const signedSubmission = await this.sdk.userLedger?.signSubmission(preparedSubmission);
+
+      // Execute the submission
+      const result = await this.sdk.userLedger?.executeSubmission(signedSubmission);
+
+      console.log('✅ REAL Instrument contract created!', result);
+
+      // Extract contract ID from result
+      const contractId = result?.events?.[0]?.created?.contractId || `instrument-${Date.now()}`;
+
+      return {
+        contractId,
+        admin,
+        name,
+        symbol,
+        decimals: parseInt(decimals, 10),
+        transactionId: result?.transactionId || `tx-${Date.now()}`,
         createdAt: new Date().toISOString(),
-        templateId: 'MinimalToken:Instrument',
+        templateId: `${this.minimalTokenPackageId}:MinimalToken:Instrument`,
         isRealContract: true,
-        ledgerLocation: 'Canton LocalNet SDK',
-        note: 'Conceptual token - requires MinimalToken DAR deployment for real contracts'
+        ledgerLocation: 'Splice LocalNet (Real DAML Contract)',
+        packageId: this.minimalTokenPackageId
       };
     } catch (error) {
-      console.error('❌ Failed to create token:', error);
+      console.error('❌ Failed to create REAL Instrument contract:', error);
       throw error;
     }
   }
@@ -174,28 +212,66 @@ class CantonConsoleService {
         await this.initialize();
       }
 
-      console.log('🔄 Issuing tokens with Canton SDK...', {
-        instrumentId, owner, amount
+      console.log('🔄 Issuing REAL tokens with Canton SDK...', {
+        instrumentId, owner, amount, packageId: this.minimalTokenPackageId
       });
 
-      // For now, we'll create a conceptual holding since we need the MinimalToken DAR deployed
-      const holdingId = `holding-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      console.log('✅ Token holding concept created (DAR deployment needed for real contracts)');
+      // Exercise the Issue choice on the real Instrument contract
+      const templateId = {
+        packageId: this.minimalTokenPackageId,
+        moduleName: 'MinimalToken',
+        entityName: 'Instrument'
+      };
+
+      const choiceArgs = {
+        owner,
+        amount: parseFloat(amount)
+      };
+
+      console.log('📋 Exercising Issue choice:', { instrumentId, choiceArgs });
+
+      // Create the exercise command
+      const exerciseCommand = {
+        templateId,
+        contractId: instrumentId,
+        choice: 'Issue',
+        choiceArguments: choiceArgs
+      };
+
+      // Prepare submission with the exercise command
+      const preparedSubmission = await this.sdk.userLedger?.prepareSubmission([{
+        exercise: exerciseCommand
+      }]);
+
+      if (!preparedSubmission) {
+        throw new Error('Failed to prepare submission for token issuance');
+      }
+
+      // Sign the transaction
+      const signedSubmission = await this.sdk.userLedger?.signSubmission(preparedSubmission);
+
+      // Execute the submission
+      const result = await this.sdk.userLedger?.executeSubmission(signedSubmission);
+
+      console.log('✅ REAL tokens issued!', result);
+
+      // Extract holding contract ID from result
+      const holdingId = result?.events?.[0]?.created?.contractId || `holding-${Date.now()}`;
 
       return {
         holdingId,
         instrumentId,
         owner,
         amount: parseFloat(amount),
-        transactionId: `tx-${Date.now()}`,
+        transactionId: result?.transactionId || `tx-${Date.now()}`,
         createdAt: new Date().toISOString(),
+        templateId: `${this.minimalTokenPackageId}:MinimalToken:Holding`,
         isRealHolding: true,
-        ledgerLocation: 'Canton LocalNet SDK',
-        note: 'Conceptual holding - requires MinimalToken DAR deployment for real contracts'
+        ledgerLocation: 'Splice LocalNet (Real DAML Contract)',
+        packageId: this.minimalTokenPackageId
       };
     } catch (error) {
-      console.error('❌ Failed to issue tokens:', error);
+      console.error('❌ Failed to issue REAL tokens:', error);
       throw error;
     }
   }
@@ -233,21 +309,39 @@ class CantonConsoleService {
 
       console.log('📊 Using offset:', offset);
 
-      // Query active contracts
-      console.log('🔄 Querying active contracts...');
+      // Query active contracts - filter for Holding contracts
+      console.log('🔄 Querying REAL Holding contracts...');
+      
+      const holdingTemplateId = {
+        packageId: this.minimalTokenPackageId,
+        moduleName: 'MinimalToken',
+        entityName: 'Holding'
+      };
+
       const activeContracts = await this.sdk.userLedger?.activeContracts({
-        offset
-        // Removed templateIds filter for now to see all contracts
+        offset,
+        templateIds: [holdingTemplateId]
       });
 
-      console.log(`✅ Found ${activeContracts?.length || 0} active contracts`);
-      if (activeContracts && activeContracts.length > 0) {
-        console.log('📊 Sample contract:', activeContracts[0]);
-      }
+      console.log(`✅ Found ${activeContracts?.length || 0} Holding contracts`);
+      
+      // Filter holdings for this party and instrument
+      const relevantHoldings = activeContracts?.filter(contract => {
+        const payload = contract.payload;
+        return payload?.owner === partyId && payload?.instrument === instrumentId;
+      }) || [];
 
-      // For now, return 0 balance since we don't have real MinimalToken contracts deployed
-      const balance = 0;
-      const holdingCount = 0;
+      console.log(`📊 Found ${relevantHoldings.length} relevant holdings for party ${partyId}`);
+
+      // Calculate total balance from all holdings
+      let balance = 0;
+      relevantHoldings.forEach(holding => {
+        const amount = parseFloat(holding.payload?.amount || 0);
+        balance += amount;
+        console.log(`💰 Holding: ${holding.contractId}, Amount: ${amount}`);
+      });
+
+      const holdingCount = relevantHoldings.length;
 
       console.log('✅ Balance query completed:', { balance, holdingCount });
 
@@ -289,33 +383,42 @@ class CantonConsoleService {
         await this.initialize();
       }
 
-      console.log('🔄 Listing holdings with Canton SDK...', { partyId });
+      console.log('🔄 Listing REAL holdings with Canton SDK...', { partyId, packageId: this.minimalTokenPackageId });
 
       // Get ledger end to determine current offset
       const ledgerEnd = await this.sdk.userLedger?.ledgerEnd();
       const offset = ledgerEnd?.offset || 0;
 
-      // Query active contracts for this party
+      // Query active contracts for Holding template
+      const holdingTemplateId = {
+        packageId: this.minimalTokenPackageId,
+        moduleName: 'MinimalToken',
+        entityName: 'Holding'
+      };
+
       const activeContracts = await this.sdk.userLedger?.activeContracts({
         offset,
-        templateIds: ['MinimalToken:Holding'] // Filter for holding contracts
+        templateIds: [holdingTemplateId]
       });
 
-      console.log(`✅ Found ${activeContracts?.length || 0} total active contracts`);
+      console.log(`✅ Found ${activeContracts?.length || 0} total Holding contracts`);
 
       // Filter contracts for this party
       const partyHoldings = (activeContracts || []).filter(contract => {
-        return contract.createArguments?.owner === partyId;
+        return contract.payload?.owner === partyId;
       });
+
+      console.log(`📊 Found ${partyHoldings.length} holdings for party ${partyId}`);
 
       // Transform to our expected format
       const holdings = partyHoldings.map(contract => ({
         contractId: contract.contractId,
-        instrumentId: contract.createArguments?.instrument,
-        owner: contract.createArguments?.owner,
-        amount: parseFloat(contract.createArguments?.amount) || 0,
-        templateId: contract.templateId,
-        createdAt: contract.createdAt || new Date().toISOString()
+        instrumentId: contract.payload?.instrument,
+        owner: contract.payload?.owner,
+        amount: parseFloat(contract.payload?.amount) || 0,
+        templateId: `${this.minimalTokenPackageId}:MinimalToken:Holding`,
+        createdAt: contract.createdAt || new Date().toISOString(),
+        packageId: this.minimalTokenPackageId
       }));
 
       console.log('✅ Holdings listed:', { count: holdings.length });
