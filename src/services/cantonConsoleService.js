@@ -10,7 +10,8 @@ import {
   localNetTopologyDefault,
   localNetTokenStandardDefault,
   createKeyPair,
-  signTransactionHash
+  signTransactionHash,
+  TopologyController
 } from '@canton-network/wallet-sdk';
 import { v4 as uuidv4 } from 'uuid';
 import { URL } from 'url';
@@ -22,6 +23,8 @@ class CantonConsoleService {
     this.isConnected = false;
     // Real MinimalToken package ID deployed to Splice LocalNet
     this.minimalTokenPackageId = 'd8325445c38031336b59afafaf5f01c83494e77884eab47baf3a6436e4be15f6';
+    // Store wallet keys for signing
+    this.walletKeys = new Map(); // partyId -> { privateKey, publicKey }
   }
 
   /**
@@ -107,6 +110,12 @@ class CantonConsoleService {
       this.sdk.userLedger?.setPartyId(preparedParty.partyId);
       this.sdk.adminLedger?.setPartyId(preparedParty.partyId);
 
+      // Store the keys for later signing operations
+      this.walletKeys.set(preparedParty.partyId, {
+        privateKey: keyPair.privateKey, // Store raw bytes for signing
+        publicKey: keyPair.publicKey    // Store raw bytes for verification
+      });
+
       const walletInfo = {
         partyId: preparedParty.partyId,
         publicKey: keyPair.publicKey,
@@ -173,18 +182,45 @@ class CantonConsoleService {
 
       console.log('✅ Prepared submission:', prepared);
 
-      // TODO: Need to sign and execute the prepared submission
-      // For now, extract what we can from the prepared response
-      const result = {
+      // Get the wallet keys for signing
+      const walletKeys = this.walletKeys.get(admin);
+      if (!walletKeys) {
+        throw new Error(`No wallet keys found for party: ${admin}`);
+      }
+
+      // Sign the prepared transaction hash
+      const signature = signTransactionHash(
+        prepared.preparedTransactionHash,
+        walletKeys.privateKey
+      );
+
+      console.log('🔐 Signed transaction hash');
+
+      // Execute the submission with signature
+      const result = await this.sdk.userLedger?.executeSubmission(
         prepared,
-        transactionId: prepared.submissionId || `tx-${Date.now()}`,
-        events: [{ created: { contractId: `instrument-${Date.now()}` } }]
-      };
+        signature,
+        walletKeys.publicKey,
+        prepared.submissionId
+      );
+
+      if (!result) {
+        throw new Error('Failed to execute submission');
+      }
 
       console.log('✅ REAL Instrument contract created!', result);
 
-      // Extract contract ID from result
-      const finalContractId = result?.events?.[0]?.created?.contractId || `instrument-${Date.now()}`;
+      // Extract contract ID from result - check the actual structure
+      let finalContractId;
+      if (result?.events && result.events.length > 0) {
+        const createEvent = result.events.find(e => e.created);
+        finalContractId = createEvent?.created?.contractId;
+      }
+      
+      if (!finalContractId) {
+        console.log('⚠️  No contract ID found in result, using fallback');
+        finalContractId = `instrument-${Date.now()}`;
+      }
 
       return {
         contractId: finalContractId,
@@ -201,6 +237,12 @@ class CantonConsoleService {
       };
     } catch (error) {
       console.error('❌ Failed to create REAL Instrument contract:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        cause: error.cause
+      });
       throw error;
     }
   }
@@ -249,13 +291,31 @@ class CantonConsoleService {
 
       console.log('✅ Prepared exercise:', prepared);
 
-      // TODO: Need to sign and execute the prepared submission
-      // For now, extract what we can from the prepared response
-      const result = {
+      // Get the wallet keys for signing (using the owner's keys since they're exercising the choice)
+      const walletKeys = this.walletKeys.get(owner);
+      if (!walletKeys) {
+        throw new Error(`No wallet keys found for party: ${owner}`);
+      }
+
+      // Sign the prepared transaction hash
+      const signature = signTransactionHash(
+        prepared.preparedTransactionHash,
+        walletKeys.privateKey
+      );
+
+      console.log('🔐 Signed exercise transaction hash');
+
+      // Execute the submission with signature
+      const result = await this.sdk.userLedger?.executeSubmission(
         prepared,
-        transactionId: prepared.submissionId || `tx-${Date.now()}`,
-        events: [{ created: { contractId: `holding-${Date.now()}` } }]
-      };
+        signature,
+        walletKeys.publicKey,
+        prepared.submissionId
+      );
+
+      if (!result) {
+        throw new Error('Failed to execute token issuance');
+      }
 
       console.log('✅ REAL tokens issued!', result);
 
