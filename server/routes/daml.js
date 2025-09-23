@@ -310,17 +310,13 @@ export default async function damlRoutes(app) {
       req.log.info({ partyId, instrumentId }, 'Querying token balance');
       
       const service = await getDamlService();
-      const balance = await service.getBalance(partyId, instrumentId);
-      
-      // Also get holding count for additional info
-      const holdings = await service.listHoldings(partyId);
-      const relevantHoldings = holdings.filter(h => h.instrumentId === instrumentId);
+      const balanceResult = await service.getBalance(partyId, instrumentId);
       
       const result = {
         partyId,
         instrumentId,
-        balance,
-        holdingCount: relevantHoldings.length
+        balance: balanceResult.balance || 0,
+        holdingCount: balanceResult.holdingCount || 0
       };
       
       req.log.info(result, 'Balance query completed');

@@ -214,47 +214,68 @@ class CantonConsoleService {
       });
 
       // Get ledger end to determine current offset
+      console.log('🔄 Getting ledger end...');
       const ledgerEnd = await this.sdk.userLedger?.ledgerEnd();
-      const offset = ledgerEnd?.offset || 0;
+      console.log('📊 Ledger end response:', ledgerEnd);
+
+      // Handle different possible offset formats
+      let offset = 0;
+      if (ledgerEnd) {
+        if (typeof ledgerEnd.offset === 'number') {
+          offset = ledgerEnd.offset;
+        } else if (typeof ledgerEnd.offset === 'string') {
+          offset = parseInt(ledgerEnd.offset, 10) || 0;
+        } else if (ledgerEnd.offset && typeof ledgerEnd.offset === 'object') {
+          // Handle case where offset might be an object with a value property
+          offset = ledgerEnd.offset.value || ledgerEnd.offset.absolute || 0;
+        }
+      }
+
+      console.log('📊 Using offset:', offset);
 
       // Query active contracts
+      console.log('🔄 Querying active contracts...');
       const activeContracts = await this.sdk.userLedger?.activeContracts({
-        offset,
-        templateIds: ['MinimalToken:Holding'] // Filter for holding contracts
+        offset
+        // Removed templateIds filter for now to see all contracts
       });
 
       console.log(`✅ Found ${activeContracts?.length || 0} active contracts`);
+      if (activeContracts && activeContracts.length > 0) {
+        console.log('📊 Sample contract:', activeContracts[0]);
+      }
 
-      // Filter contracts for this party and instrument
-      const relevantHoldings = (activeContracts || []).filter(contract => {
-        // This would need to be adjusted based on the actual contract structure
-        return contract.createArguments?.owner === partyId && 
-               contract.createArguments?.instrument === instrumentId;
-      });
+      // For now, return 0 balance since we don't have real MinimalToken contracts deployed
+      const balance = 0;
+      const holdingCount = 0;
 
-      // Calculate total balance (for now return 0 since we don't have real contracts yet)
-      const balance = 0; // Will be calculated from real contracts once DAR is deployed
-
-      console.log('✅ Balance calculated:', { balance, holdingCount: relevantHoldings.length });
+      console.log('✅ Balance query completed:', { balance, holdingCount });
 
       return {
         partyId,
         instrumentId,
         balance,
-        holdingCount: relevantHoldings.length,
-        activeContracts: relevantHoldings,
+        holdingCount,
+        totalActiveContracts: activeContracts?.length || 0,
         ledgerOffset: offset,
         queriedAt: new Date().toISOString()
       };
     } catch (error) {
       console.error('❌ Failed to query balance:', error);
-      // Return 0 balance on error for now
+      console.error('❌ Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      // Return 0 balance on error
       return {
         partyId,
         instrumentId,
         balance: 0,
         holdingCount: 0,
-        error: error.message
+        error: error.message,
+        queriedAt: new Date().toISOString()
       };
     }
   }
