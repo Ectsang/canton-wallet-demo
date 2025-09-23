@@ -4,12 +4,13 @@ import swagger from '@fastify/swagger'
 import swaggerUI from '@fastify/swagger-ui'
 import dotenv from 'dotenv'
 import initRoutes from './routes/init.js'
+import damlRoutes from './routes/daml.js'
 import sdkManager from './sdkManager.js'
 
 dotenv.config({ path: '.env.server' })
 
 const PORT = Number(process.env.PORT || 8899)
-const ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173'
+const ORIGIN = process.env.CORS_ORIGIN || ''
 
 const app = Fastify({
   logger: {
@@ -21,11 +22,22 @@ const app = Fastify({
   }
 })
 
-await app.register(cors, { origin: ORIGIN, credentials: true })
+const allowedOrigins = ORIGIN.split(',').map(s => s.trim()).filter(Boolean)
+await app.register(cors, { 
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true)
+    if (allowedOrigins.length > 0) {
+      return cb(null, allowedOrigins.includes(origin))
+    }
+    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
+    return cb(null, isLocalhost)
+  },
+  credentials: true
+})
 
 await app.register(swagger, {
   openapi: {
-    info: { title: 'Canton Wallet BFF', version: '0.1.0' }
+    info: { title: 'Canton Wallet Backend', version: '0.1.0' }
   }
 })
 await app.register(swaggerUI, { routePrefix: '/docs', staticCSP: true })
@@ -34,6 +46,7 @@ await app.register(swaggerUI, { routePrefix: '/docs', staticCSP: true })
 sdkManager.setLogger(app.log)
 
 await initRoutes(app)
+await damlRoutes(app)
 
 app.get('/api/health', async (req, reply) => {
   return {
@@ -45,7 +58,7 @@ app.get('/api/health', async (req, reply) => {
 
 try {
   await app.listen({ port: PORT, host: '0.0.0.0' })
-  app.log.info(`BFF listening on http://localhost:${PORT}`)
+  app.log.info(`Backend listening on http://localhost:${PORT}`)
   app.log.info(`Docs at http://localhost:${PORT}/docs`)
 } catch (err) {
   app.log.error(err)

@@ -1,0 +1,52 @@
+module MinimalToken where
+
+template Instrument
+  with
+    admin    : Party
+    name     : Text
+    symbol   : Text
+    decimals : Int
+  where
+    signatory admin
+
+    -- Admin mints a Holding directly to an owner
+    choice Issue : ContractId Holding
+      with
+        owner  : Party
+        amount : Decimal
+      controller admin
+      do
+        assertMsg "amount must be positive" (amount > 0.0)
+        create Holding with owner, instrument = self, amount
+
+template Holding
+  with
+    owner      : Party
+    instrument : ContractId Instrument
+    amount     : Decimal
+  where
+    signatory owner
+
+    -- Transfer part or all of the holding; consumes self and
+    -- returns new recipient holding and optional change for sender
+    choice Transfer : (ContractId Holding, Optional (ContractId Holding))
+      with
+        recipient      : Party
+        transferAmount : Decimal
+      controller owner
+      do
+        assertMsg "transferAmount must be positive" (transferAmount > 0.0)
+        assertMsg "insufficient balance" (transferAmount <= amount)
+        archive self
+        newCid <- create Holding with
+          owner = recipient
+          instrument
+          amount = transferAmount
+        if transferAmount < amount then do
+          changeCid <- create Holding with
+            owner = owner
+            instrument
+            amount = amount - transferAmount
+          return (newCid, Some changeCid)
+        else
+          return (newCid, None)

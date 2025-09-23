@@ -12,6 +12,7 @@ class SdkManager {
   logger = console
   initialized = false
   topologyConnected = false
+  privateKey = ''
 
   setLogger(logger) {
     this.logger = logger || console
@@ -26,6 +27,7 @@ class SdkManager {
 
   async init() {
     const scanApiUrl = process.env.SCAN_API_URL
+    const registryEnv = process.env.REGISTRY_API_URL
     if (!this.sdk) {
       this.sdk = new WalletSDKImpl().configure({
         logger: this.logger,
@@ -45,6 +47,11 @@ class SdkManager {
         const url = new URL(scanApiUrl)
         await this.sdk.connectTopology(url)
         this.topologyConnected = true
+        // Derive a default Registry API URL from SCAN base if not provided
+        const derivedRegistry = `${url.origin}/registry`
+        const registryUrl = registryEnv || derivedRegistry
+        this.logger?.info(`Using Registry API URL: ${registryUrl}`)
+        this.sdk.tokenStandard?.setTransferFactoryRegistryUrl(registryUrl)
       } catch (err) {
         this.topologyConnected = false
         this.logger?.error({ err }, 'connectTopology failed')

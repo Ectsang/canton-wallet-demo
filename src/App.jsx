@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import cantonService from './cantonService';
+import FrontendCantonService from './services/frontendCantonService';
+import storageService from './services/storageService';
+
+// Real Canton Network integration using DAML contracts via backend API
+const cantonService = new FrontendCantonService();
+console.log('🎯 Real Canton Integration: Frontend calling backend for DAML contracts');
 
 function App() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -23,20 +28,67 @@ function App() {
   const [tokenBalance, setTokenBalance] = useState(0);
 
   useEffect(() => {
-    initializeSDK();
+    initializeApp();
   }, []);
 
-  const initializeSDK = async () => {
+  const initializeApp = async () => {
     try {
       setLoading(true);
       setError('');
+      
+      // Initialize Canton service
       await cantonService.initialize();
       setIsInitialized(true);
-      setSuccess('Canton SDK initialized successfully');
+      
+      // Load existing wallet and token data
+      await loadExistingData();
+      
+      setSuccess('App initialized successfully');
     } catch (err) {
-      setError(`Failed to initialize SDK: ${err.message}`);
+      setError(`Failed to initialize app: ${err.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadExistingData = async () => {
+    try {
+      // Load wallet from localStorage
+      const savedWallet = storageService.loadWallet();
+      if (savedWallet) {
+        setWallet(savedWallet);
+        cantonService.setPartyId(savedWallet.partyId);
+        setPartyHint(savedWallet.partyHint || 'my-wallet-demo');
+        console.log('✅ Loaded existing wallet from storage');
+      }
+
+      // Load token from localStorage
+      const savedToken = storageService.loadToken();
+      if (savedToken) {
+        setCreatedToken(savedToken);
+        setTokenName(savedToken.name);
+        setTokenSymbol(savedToken.symbol);
+        setTokenDecimals(savedToken.decimals);
+        console.log('✅ Loaded existing token from storage');
+        
+        // If we have both wallet and token, load the current balance
+        if (savedWallet && savedToken) {
+          await loadTokenBalance(savedWallet.partyId, savedToken.tokenId);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Failed to load existing data:', error);
+    }
+  };
+
+  const loadTokenBalance = async (partyId, tokenId) => {
+    try {
+      const balance = await cantonService.getTokenBalance(partyId, tokenId);
+      const decimals = createdToken?.decimals || 2;
+      setTokenBalance(balance / Math.pow(10, decimals));
+      console.log('✅ Loaded current token balance:', balance);
+    } catch (error) {
+      console.error('❌ Failed to load token balance:', error);
     }
   };
 
@@ -61,8 +113,16 @@ function App() {
       setError('');
       setSuccess('');
       const walletInfo = await cantonService.createExternalWallet(partyHint);
-      setWallet(walletInfo);
-      setSuccess('External wallet created successfully');
+      
+      // Add party hint to wallet info
+      const walletWithHint = { ...walletInfo, partyHint };
+      
+      setWallet(walletWithHint);
+      
+      // Save wallet to localStorage
+      storageService.saveWallet(walletWithHint);
+      
+      setSuccess('External wallet created and saved successfully');
     } catch (err) {
       setError(`Failed to create wallet: ${err.message}`);
     } finally {
@@ -76,8 +136,6 @@ function App() {
       setError('');
       setSuccess('');
       
-      // Note: The actual token creation might need adjustment based on the Canton token standard API
-      // This is a simplified version
       const token = await cantonService.createToken(
         tokenName,
         tokenSymbol,
@@ -85,7 +143,11 @@ function App() {
       );
       
       setCreatedToken(token);
-      setSuccess('Token created successfully');
+      
+      // Save token to localStorage
+      storageService.saveToken(token);
+      
+      setSuccess('Token created and saved successfully');
     } catch (err) {
       setError(`Failed to create token: ${err.message}`);
     } finally {
@@ -134,11 +196,39 @@ function App() {
     }
   };
 
+  const clearAllData = () => {
+    if (window.confirm('Are you sure you want to clear all wallet and token data? This cannot be undone.')) {
+      storageService.clearAll();
+      setWallet(null);
+      setCreatedToken(null);
+      setTokenBalance(0);
+      setPartyHint('my-wallet-demo');
+      setTokenName('Demo Token');
+      setTokenSymbol('DEMO');
+      setTokenDecimals(2);
+      setMintAmount(1000);
+      setIsConnected(false);
+      setSuccess('All data cleared successfully');
+    }
+  };
+
+  const copyToClipboard = (text, label) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setSuccess(`${label} copied to clipboard`);
+      setTimeout(() => setSuccess(''), 2000);
+    }).catch(() => {
+      setError('Failed to copy to clipboard');
+    });
+  };
+
   return (
     <div className="container">
       <div className="header">
         <h1>Canton Wallet Demo</h1>
         <p>Create an external wallet and mint tokens using Canton Network</p>
+        <div className="mode-indicator real">
+          <span>🌐 <strong>CANTON LOCALNET</strong> - Real Canton Network Integration</span>
+        </div>
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -194,10 +284,67 @@ function App() {
             </>
           ) : (
             <div className="info-box">
-              <h3>Wallet Created Successfully</h3>
-              <p><strong>Party ID:</strong> {wallet.partyId}</p>
-              <p><strong>Public Key:</strong> {wallet.publicKey}</p>
-              <p><strong>Fingerprint:</strong> {wallet.fingerprint}</p>
+              <h3>Wallet Details {wallet.createdAt && <span style={{fontSize: '0.8em', color: '#666'}}>({new Date(wallet.createdAt).toLocaleString()})</span>}</h3>
+              
+              <div className="wallet-detail">
+                <strong>Party Hint:</strong> {wallet.partyHint || 'N/A'}
+              </div>
+              
+              <div className="wallet-detail">
+                <strong>Party ID:</strong> 
+                <div className="copyable-field">
+                  <code className="party-id">{wallet.partyId}</code>
+                  <button 
+                    className="copy-btn" 
+                    onClick={() => copyToClipboard(wallet.partyId, 'Party ID')}
+                    title="Copy Party ID"
+                  >
+                    📋
+                  </button>
+                </div>
+              </div>
+              
+              <div className="wallet-detail">
+                <strong>Public Key:</strong>
+                <div className="copyable-field">
+                  <code className="public-key">{wallet.publicKey}</code>
+                  <button 
+                    className="copy-btn" 
+                    onClick={() => copyToClipboard(wallet.publicKey, 'Public Key')}
+                    title="Copy Public Key"
+                  >
+                    📋
+                  </button>
+                </div>
+              </div>
+              
+              <div className="wallet-detail">
+                <strong>Private Key:</strong>
+                <div className="copyable-field">
+                  <code className="private-key">{wallet.privateKey}</code>
+                  <button 
+                    className="copy-btn" 
+                    onClick={() => copyToClipboard(wallet.privateKey, 'Private Key')}
+                    title="Copy Private Key"
+                  >
+                    📋
+                  </button>
+                </div>
+              </div>
+              
+              <div className="wallet-detail">
+                <strong>Fingerprint:</strong> <code>{wallet.fingerprint}</code>
+              </div>
+              
+              <div className="wallet-actions">
+                <button 
+                  className="button danger small" 
+                  onClick={clearAllData}
+                  title="Clear all stored data"
+                >
+                  🗑️ Clear All Data
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -251,10 +398,57 @@ function App() {
             </>
           ) : (
             <div className="info-box">
-              <h3>Token Created Successfully</h3>
-              <p><strong>Token Name:</strong> {tokenName}</p>
-              <p><strong>Token Symbol:</strong> {tokenSymbol}</p>
-              <p><strong>Decimals:</strong> {tokenDecimals}</p>
+              <h3>Token Details {createdToken.createdAt && <span style={{fontSize: '0.8em', color: '#666'}}>({new Date(createdToken.createdAt).toLocaleString()})</span>}</h3>
+              
+              <div className="token-detail">
+                <strong>Token Name:</strong> {createdToken.name}
+              </div>
+              
+              <div className="token-detail">
+                <strong>Token Symbol:</strong> <code>{createdToken.symbol}</code>
+              </div>
+              
+              <div className="token-detail">
+                <strong>Decimals:</strong> {createdToken.decimals}
+              </div>
+              
+              <div className="token-detail">
+                <strong>Token ID:</strong>
+                <div className="copyable-field">
+                  <code className="token-id">{createdToken.tokenId}</code>
+                  <button 
+                    className="copy-btn" 
+                    onClick={() => copyToClipboard(createdToken.tokenId, 'Token ID')}
+                    title="Copy Token ID"
+                  >
+                    📋
+                  </button>
+                </div>
+              </div>
+              
+              <div className="token-detail">
+                <strong>Contract ID:</strong>
+                <div className="copyable-field">
+                  <code className="contract-id">{createdToken.contractId || createdToken.tokenId}</code>
+                  <button 
+                    className="copy-btn" 
+                    onClick={() => copyToClipboard(createdToken.contractId || createdToken.tokenId, 'Contract ID')}
+                    title="Copy Contract ID"
+                  >
+                    📋
+                  </button>
+                </div>
+              </div>
+              
+              <div className="token-detail">
+                <strong>Admin:</strong> <code className="admin-id">{createdToken.admin}</code>
+              </div>
+              
+              {createdToken.isRealContract && (
+                <div className="token-status">
+                  ✅ <strong>Real DAML Contract</strong> - This token exists on Canton ledger
+                </div>
+              )}
             </div>
           )}
         </div>
