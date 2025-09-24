@@ -76,7 +76,8 @@ class CantonConsoleService {
 
       // Prepare external party topology
       const preparedParty = await this.sdk.topology?.prepareExternalPartyTopology(
-        keyPair.publicKey
+        keyPair.publicKey,
+        partyHint  // Add the partyHint parameter
       );
       
       if (!preparedParty) {
@@ -115,6 +116,9 @@ class CantonConsoleService {
         privateKey: keyPair.privateKey, // Store raw bytes for signing
         publicKey: keyPair.publicKey    // Store raw bytes for verification
       });
+      
+      console.log('🔑 Stored wallet keys for party:', preparedParty.partyId);
+      console.log('🔑 Total stored keys:', this.walletKeys.size);
 
       const walletInfo = {
         partyId: preparedParty.partyId,
@@ -190,17 +194,18 @@ class CantonConsoleService {
       console.log('✅ Prepared submission:', prepared);
 
       // Get the wallet keys for signing - generate if not exists
+      console.log('🔍 Looking for wallet keys for party:', admin);
+      console.log('🔍 Available keys:', Array.from(this.walletKeys.keys()));
+      console.log('🔍 Total stored keys:', this.walletKeys.size);
+      
       let walletKeys = this.walletKeys.get(admin);
       if (!walletKeys) {
-        console.log(`⚠️  No wallet keys found for party: ${admin}, generating new keys`);
-        const keyPair = createKeyPair();
-        walletKeys = {
-          privateKey: keyPair.privateKey,
-          publicKey: keyPair.publicKey
-        };
-        this.walletKeys.set(admin, walletKeys);
-        console.log('🔑 Generated keys for admin party');
+        console.log(`❌ CRITICAL: No wallet keys found for party: ${admin}`);
+        console.log('❌ This party must be created first via createExternalWallet!');
+        throw new Error(`No wallet keys found for party: ${admin}. Create wallet first.`);
       }
+      
+      console.log('✅ Found wallet keys for party:', admin);
 
       // Sign the prepared transaction hash
       const signature = signTransactionHash(
