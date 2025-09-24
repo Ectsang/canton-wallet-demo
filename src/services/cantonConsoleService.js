@@ -257,6 +257,7 @@ class CantonConsoleService {
           
           const transactionRequest = {
             updateId: result.updateId,
+            verbose: true, // Add the missing required field
             updateFormat: {
               includeTransactions: {
                 transactionShape: "TRANSACTION_SHAPE_LEDGER_EFFECTS",
@@ -296,7 +297,7 @@ class CantonConsoleService {
             console.log('❌ Error response:', errorText);
           } else {
             const transactionData = await response.json();
-            console.log('✅ JSON Ledger API response:', JSON.stringify(transactionData, null, 2));
+            console.log('🎉 JSON Ledger API SUCCESS! Response received:', JSON.stringify(transactionData, null, 2));
             
             // Parse the transaction events to find CreatedEvent for our contract
             // Based on REFERENCE.md: "Find all CreatedEvents in that range"
@@ -383,9 +384,49 @@ class CantonConsoleService {
         }
         
         if (!finalContractId) {
-          console.log('⚠️ All contract ID extraction methods failed, using updateId as temporary contract ID for testing...');
-          finalContractId = result.updateId; // Use updateId as contract ID for testing
-          console.log('🔧 Using updateId as contract ID:', finalContractId);
+          console.log('⚠️ JSON Ledger API failed, trying activeContracts query as primary method...');
+          try {
+            const instrumentTemplateId = `${this.minimalTokenPackageId}:MinimalToken:Instrument`;
+            
+            // Query all active Instrument contracts for this admin
+            const activeContracts = await this.sdk.userLedger?.activeContracts({
+              offset: result.offset, // Use the offset from the completion result
+              templateIds: [instrumentTemplateId]
+            });
+            
+            console.log('📋 All active Instrument contracts:', JSON.stringify(activeContracts, null, 2));
+            
+            if (activeContracts?.length > 0) {
+              // Find the contract created by this admin party
+              const adminContracts = activeContracts.filter(contract => {
+                const payload = contract.payload || contract.createArguments || contract.arguments;
+                console.log('🔍 Checking contract payload for admin match:', JSON.stringify(payload, null, 2));
+                return payload?.admin === admin;
+              });
+              
+              console.log(`📊 Found ${adminContracts.length} contracts for admin: ${admin}`);
+              
+              if (adminContracts.length > 0) {
+                // Use the most recent contract (should be the one we just created)
+                const latestContract = adminContracts[adminContracts.length - 1];
+                finalContractId = latestContract.contractId;
+                console.log('🎉 FOUND REAL CONTRACT ID via activeContracts:', finalContractId);
+                console.log('📋 Contract details:', JSON.stringify(latestContract, null, 2));
+              } else {
+                console.log('❌ No contracts found for admin party:', admin);
+              }
+            } else {
+              console.log('❌ No active Instrument contracts found');
+            }
+          } catch (activeError) {
+            console.log('❌ ActiveContracts query failed:', activeError);
+          }
+        }
+        
+        if (!finalContractId) {
+          console.log('⚠️ All contract ID extraction methods failed, using updateId as fallback...');
+          finalContractId = result.updateId; // Use updateId as fallback
+          console.log('🔧 Using updateId as fallback contract ID:', finalContractId);
         }
       } else if (!finalContractId) {
         throw new Error('Failed to extract contract ID - no updateId available in completion result.');
