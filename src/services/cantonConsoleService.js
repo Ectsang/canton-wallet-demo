@@ -257,6 +257,7 @@ class CantonConsoleService {
           
           const transactionRequest = {
             updateId: result.updateId,
+            verbose: true, // Required field that was missing
             updateFormat: {
               includeTransactions: {
                 transactionShape: "TRANSACTION_SHAPE_LEDGER_EFFECTS",
