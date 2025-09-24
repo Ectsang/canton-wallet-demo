@@ -74,57 +74,37 @@ class CantonConsoleService {
       const keyPair = createKeyPair();
       console.log('✅ Generated cryptographic key pair');
 
-      // Prepare external party topology
-      const preparedParty = await this.sdk.topology?.prepareExternalPartyTopology(
-        keyPair.publicKey,
-        partyHint  // Add the partyHint parameter
-      );
-      
-      if (!preparedParty) {
-        throw new Error('Failed to prepare external party topology');
-      }
-
-      console.log('✅ Prepared external party topology:', preparedParty.partyId);
-
-      // Sign the combined hash
-      const base64StringCombinedHash = Buffer.from(
-        preparedParty.combinedHash,
-        'hex'
-      ).toString('base64');
-
-      const signedHash = signTransactionHash(
-        base64StringCombinedHash,
-        keyPair.privateKey
-      );
-
-      // Submit the external party topology
-      const allocatedParty = await this.sdk.topology?.submitExternalPartyTopology(
-        signedHash, 
-        preparedParty
+      // Use the one-step approach as recommended in REFERENCE.md
+      console.log('🔄 Creating external party using prepareSignAndSubmitExternalParty...');
+      const allocatedParty = await this.sdk.topology?.prepareSignAndSubmitExternalParty(
+        keyPair.privateKey,
+        partyHint
       );
 
       if (!allocatedParty) {
-        throw new Error('Failed to submit external party topology');
+        throw new Error('Failed to create external party');
       }
 
+      console.log('✅ External party created successfully:', allocatedParty.partyId);
+
       // Set party ID for ledger operations
-      this.sdk.userLedger?.setPartyId(preparedParty.partyId);
-      this.sdk.adminLedger?.setPartyId(preparedParty.partyId);
+      this.sdk.userLedger?.setPartyId(allocatedParty.partyId);
+      this.sdk.adminLedger?.setPartyId(allocatedParty.partyId);
 
       // Store the keys for later signing operations
-      this.walletKeys.set(preparedParty.partyId, {
+      this.walletKeys.set(allocatedParty.partyId, {
         privateKey: keyPair.privateKey, // Store raw bytes for signing
         publicKey: keyPair.publicKey    // Store raw bytes for verification
       });
       
-      console.log('🔑 Stored wallet keys for party:', preparedParty.partyId);
+      console.log('🔑 Stored wallet keys for party:', allocatedParty.partyId);
       console.log('🔑 Total stored keys:', this.walletKeys.size);
 
       const walletInfo = {
-        partyId: preparedParty.partyId,
+        partyId: allocatedParty.partyId,
         publicKey: keyPair.publicKey,
         privateKey: keyPair.privateKey,
-        fingerprint: preparedParty.partyId.split('::')[1] || 'unknown',
+        fingerprint: allocatedParty.partyId.split('::')[1] || 'unknown',
         partyHint,
         createdAt: new Date().toISOString(),
         isRealWallet: true,
