@@ -19,7 +19,7 @@ import { URL } from 'url';
 class CantonConsoleService {
   constructor() {
     this.sdk = null;
-    this.scanApiUrl = new URL("http://scan.localhost:4000/api/scan");
+    this.scanApiUrl = new URL("http://wallet.localhost:2000/api/validator");
     this.isConnected = false;
     // Real MinimalToken package ID deployed to Splice LocalNet
     this.minimalTokenPackageId = 'd8325445c38031336b59afafaf5f01c83494e77884eab47baf3a6436e4be15f6';
