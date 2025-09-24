@@ -163,16 +163,6 @@ class CantonConsoleService {
       await this.sdk.setPartyId(admin, synchronizerId);
       console.log('🔧 Set party ID on SDK 0.7.0 with explicit synchronizer ID:', { admin, synchronizerId });
 
-      // Use prepareSubmission with the correctly formatted commands and command ID
-      const commandId = uuidv4(); // Generate unique command ID
-      const prepared = await this.sdk.userLedger?.prepareSubmission(commands, commandId);
-      
-      if (!prepared) {
-        throw new Error('Failed to prepare submission for Instrument creation');
-      }
-
-      console.log('✅ Prepared submission:', prepared);
-
       // Get the wallet keys for signing - generate if not exists
       console.log('🔍 Looking for wallet keys for party:', admin);
       console.log('🔍 Available keys:', Array.from(this.walletKeys.keys()));
@@ -187,51 +177,190 @@ class CantonConsoleService {
       
       console.log('✅ Found wallet keys for party:', admin);
 
-      // Sign the prepared transaction hash
-      const signature = signTransactionHash(
-        prepared.preparedTransactionHash,
-        walletKeys.privateKey
+      // Use SDK 0.7.0 prepareSignAndExecuteTransaction method (simpler than manual prepare/sign/execute)
+      const commandId = uuidv4(); // Generate unique command ID
+      console.log('🔄 Using SDK 0.7.0 prepareSignAndExecuteTransaction method...');
+      
+      // Get ledger offset before preparing command (SDK 0.7.0 best practice)
+      const offsetLatest = (await this.sdk.userLedger?.ledgerEnd())?.offset ?? 0;
+      console.log('📊 Ledger offset before transaction:', offsetLatest);
+      
+      const returnedCommandId = await this.sdk.userLedger?.prepareSignAndExecuteTransaction(
+        commands,
+        walletKeys.privateKey,
+        commandId
       );
-
-      console.log('🔐 Signed transaction hash');
-
-      // Execute the submission with signature and separate submission ID
-      const submissionId = uuidv4(); // Generate unique submission ID for execution
-      const result = await this.sdk.userLedger?.executeSubmission(
-        prepared,
-        signature,
-        walletKeys.publicKey,
-        submissionId
+      
+      console.log('✅ Transaction executed, returned command ID:', returnedCommandId);
+      
+      // Wait for command completion (SDK 0.7.0 feature) - this returns the actual result
+      console.log('🔄 Waiting for completion with params:', {
+        offsetLatest,
+        timeout: 5000,
+        commandId: returnedCommandId || commandId
+      });
+      
+      const completion = await this.sdk.userLedger?.waitForCompletion(
+        offsetLatest, // where to start from
+        5000, // timeout in ms
+        returnedCommandId || commandId // use returned command ID or fallback to original
       );
+      
+      console.log('✅ Command completion result:', JSON.stringify(completion, null, 2));
+      console.log('✅ Completion type:', typeof completion);
+      console.log('✅ Completion keys:', completion ? Object.keys(completion) : 'null');
 
-      if (!result) {
-        throw new Error('Failed to execute submission');
+      if (!completion) {
+        throw new Error('Failed to get completion result');
       }
+      
+      // Use completion as the result (this should contain the contract events)
+      const result = completion;
 
       console.log('✅ REAL Instrument contract created!', result);
+      console.log('🔍 Result structure:', JSON.stringify(result, null, 2));
 
       // Extract contract ID from result - check the actual structure
       let finalContractId;
       if (result?.events && result.events.length > 0) {
-        const createEvent = result.events.find(e => e.created);
-        finalContractId = createEvent?.created?.contractId;
+        // Look for CreatedEvent in the events array
+        const createEvent = result.events.find(e => e.created || e.CreatedEvent);
+        finalContractId = createEvent?.created?.contractId || createEvent?.CreatedEvent?.contractId;
+        
+        // Also check if contractId is directly in the event
+        if (!finalContractId) {
+          finalContractId = result.events.find(e => e.contractId)?.contractId;
+        }
       }
       
-      if (!finalContractId) {
-        console.log('⚠️  No contract ID found in result, using fallback');
-        finalContractId = `instrument-${Date.now()}`;
+      // Check if contractId is at the top level of result
+      if (!finalContractId && result?.contractId) {
+        finalContractId = result.contractId;
       }
+      
+      if (!finalContractId && result?.updateId) {
+        console.log('⚠️  No contract ID found in completion result, querying transaction events...');
+        console.log('🔍 Using updateId:', result.updateId);
+        
+        // Query transaction events using the updateId to get the contract ID
+        try {
+          console.log('🔄 Querying transaction by updateId...');
+          
+          // Try multiple approaches to get the transaction
+          let transactionById = null;
+          
+          // Approach 1: Use tokenStandard.getTransactionById (SDK 0.7.0)
+          if (this.sdk.tokenStandard?.getTransactionById) {
+            try {
+              transactionById = await this.sdk.tokenStandard.getTransactionById(result.updateId);
+              console.log('📋 TokenStandard getTransactionById result:', JSON.stringify(transactionById, null, 2));
+            } catch (e) {
+              console.log('⚠️ TokenStandard getTransactionById failed:', e.message);
+            }
+          }
+          
+          // Approach 2: Use userLedger methods if available
+          if (!transactionById && this.sdk.userLedger) {
+            try {
+              // Try to get transaction by update ID using ledger API
+              console.log('🔄 Trying userLedger approach...');
+              // This might not be the exact method name, but let's try
+              if (this.sdk.userLedger.getTransactionById) {
+                transactionById = await this.sdk.userLedger.getTransactionById(result.updateId);
+                console.log('📋 UserLedger getTransactionById result:', JSON.stringify(transactionById, null, 2));
+              }
+            } catch (e) {
+              console.log('⚠️ UserLedger getTransactionById failed:', e.message);
+            }
+          }
+          
+          // Look for CreatedEvent in the transaction
+          if (transactionById?.events) {
+            for (const event of transactionById.events) {
+              if (event.created || event.CreatedEvent) {
+                finalContractId = event.created?.contractId || event.CreatedEvent?.contractId;
+                if (finalContractId) {
+                  console.log('✅ Found contract ID in transaction events:', finalContractId);
+                  break;
+                }
+              }
+            }
+          }
+          
+          // If still no contract ID, try the transaction structure itself
+          if (!finalContractId && transactionById?.transaction) {
+            console.log('🔍 Checking transaction structure for contract ID...');
+            const tx = transactionById.transaction;
+            if (tx.events) {
+              for (const event of tx.events) {
+                if (event.created || event.CreatedEvent) {
+                  finalContractId = event.created?.contractId || event.CreatedEvent?.contractId;
+                  if (finalContractId) {
+                    console.log('✅ Found contract ID in nested transaction events:', finalContractId);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch (queryError) {
+          console.log('❌ Transaction query failed:', queryError);
+        }
+        
+        // Approach 3: Query active contracts with the correct offset
+        if (!finalContractId) {
+          console.log('🔄 Trying activeContracts query with offset...');
+          try {
+            const instrumentTemplateId = `${this.minimalTokenPackageId}:MinimalToken:Instrument`;
+            const activeContracts = await this.sdk.userLedger?.activeContracts({
+              templateIds: [instrumentTemplateId],
+              activeAtOffset: result.offset // Use the offset from the completion result
+            });
+            
+            console.log('📋 Active contracts with offset:', activeContracts);
+            
+            // Find the contract that was just created (should be the latest one for this admin)
+            if (activeContracts?.length > 0) {
+              // Look for a contract with matching admin
+              const matchingContract = activeContracts.find(contract => 
+                contract.payload?.admin === admin || 
+                contract.createArguments?.admin === admin ||
+                contract.arguments?.admin === admin
+              );
+              
+              if (matchingContract) {
+                finalContractId = matchingContract.contractId;
+                console.log('✅ Found matching contract via activeContracts:', finalContractId);
+              } else {
+                // Fallback: use the most recent contract
+                finalContractId = activeContracts[activeContracts.length - 1].contractId;
+                console.log('✅ Using most recent contract from activeContracts:', finalContractId);
+              }
+            }
+          } catch (activeError) {
+            console.log('❌ ActiveContracts query failed:', activeError.message);
+          }
+        }
+        
+        if (!finalContractId) {
+          throw new Error(`Failed to extract contract ID from transaction ${result.updateId}. Contract creation succeeded but ID extraction failed.`);
+        }
+      } else if (!finalContractId) {
+        throw new Error('Failed to extract contract ID - no updateId available in completion result.');
+      }
+      
+      console.log('✅ Extracted real contract ID:', finalContractId);
 
-        return {
+      return {
           contractId: finalContractId,
-          admin,
-          name,
-          symbol,
+        admin,
+        name,
+        symbol,
           decimals: parseInt(decimals, 10),
           transactionId: result?.transactionId || `tx-${Date.now()}`,
-          createdAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
           templateId: `${this.minimalTokenPackageId}:MinimalToken:Instrument`,
-          isRealContract: true,
+        isRealContract: true,
           ledgerLocation: 'Splice LocalNet (Real DAML Contract)',
           packageId: this.minimalTokenPackageId
         };
@@ -252,14 +381,14 @@ class CantonConsoleService {
             console.error('❌ Response data:', JSON.stringify(error.response.data, null, 2));
           }
           
-          throw error;
-        }
+      throw error;
+    }
   }
 
   /**
    * Issue tokens using Canton Wallet SDK
    */
-  async issueTokens({ instrumentId, owner, amount }) {
+  async issueTokens({ instrumentId, owner, amount, admin }) {
     try {
       if (!this.isConnected) {
         await this.initialize();
@@ -274,61 +403,69 @@ class CantonConsoleService {
 
       const choiceArgs = {
         owner,
-        amount: parseFloat(amount)
+        amount: amount.toString() // DAML Decimal should be string in JSON
       };
 
       console.log('📋 Exercising Issue choice:', { instrumentId, choiceArgs });
 
-      // Create the exercise command with correct Canton SDK format
+      // Create the exercise command with correct Canton SDK format (note: singular "choiceArgument")
       const commands = [{
         ExerciseCommand: {
           templateId,
           contractId: instrumentId,
           choice: 'Issue',
-          choiceArguments: choiceArgs
+          choiceArgument: choiceArgs
         }
       }];
 
       console.log('📋 Preparing REAL DAML exercise with correct format:', { commands });
+      console.log('🔍 ExerciseCommand details:', JSON.stringify(commands[0].ExerciseCommand, null, 2));
 
       // Use SDK 0.7.0 new API - setPartyId handles all setup automatically
       // Use the actual synchronizer ID from LocalNet
+      // IMPORTANT: Issue choice must be exercised by admin party, not owner party
       const synchronizerId = 'global-domain::12200331920f4dc92981db2f8dd3b4fa2c9885eba83bf6c09fe9936d9097463baa2a';
-      await this.sdk.setPartyId(owner, synchronizerId);
-      console.log('🔧 Set party ID on SDK 0.7.0 for token issuance with explicit synchronizer ID:', { owner, synchronizerId });
+      const adminParty = admin || owner; // Use admin if provided, fallback to owner for backward compatibility
+      await this.sdk.setPartyId(adminParty, synchronizerId);
+      console.log('🔧 Set party ID on SDK 0.7.0 for token issuance with explicit synchronizer ID:', { adminParty, synchronizerId });
 
-      // Use prepareSubmission with the correctly formatted commands and command ID
-      const commandId = uuidv4(); // Generate unique command ID
-      const prepared = await this.sdk.userLedger?.prepareSubmission(commands, commandId);
-      
-      if (!prepared) {
-        throw new Error('Failed to prepare submission for token issuance');
-      }
-
-      console.log('✅ Prepared exercise:', prepared);
-
-      // Get the wallet keys for signing (using the owner's keys since they're exercising the choice)
-      const walletKeys = this.walletKeys.get(owner);
+      // Get the wallet keys for signing (using the admin's keys since admin exercises the Issue choice)
+      const walletKeys = this.walletKeys.get(adminParty);
       if (!walletKeys) {
-        throw new Error(`No wallet keys found for party: ${owner}`);
+        throw new Error(`No wallet keys found for admin party: ${adminParty}`);
       }
 
-      // Sign the prepared transaction hash
-      const signature = signTransactionHash(
-        prepared.preparedTransactionHash,
-        walletKeys.privateKey
+      // Use SDK 0.7.0 prepareSignAndExecuteTransaction method (simpler than manual prepare/sign/execute)
+      const commandId = uuidv4(); // Generate unique command ID
+      console.log('🔄 Using SDK 0.7.0 prepareSignAndExecuteTransaction for token issuance...');
+      
+      // Get ledger offset before preparing command (SDK 0.7.0 best practice)
+      const offsetLatest = (await this.sdk.userLedger?.ledgerEnd())?.offset ?? 0;
+      console.log('📊 Ledger offset before issuance:', offsetLatest);
+      
+      const returnedCommandId = await this.sdk.userLedger?.prepareSignAndExecuteTransaction(
+        commands,
+        walletKeys.privateKey,
+        commandId
       );
-
-      console.log('🔐 Signed exercise transaction hash');
-
-      // Execute the submission with signature and separate submission ID
-      const submissionId = uuidv4(); // Generate unique submission ID for execution
-      const result = await this.sdk.userLedger?.executeSubmission(
-        prepared,
-        signature,
-        walletKeys.publicKey,
-        submissionId
+      
+      console.log('✅ Issuance executed, returned command ID:', returnedCommandId);
+      
+      // Wait for command completion (SDK 0.7.0 feature) - this returns the actual result
+      const completion = await this.sdk.userLedger?.waitForCompletion(
+        offsetLatest, // where to start from
+        5000, // timeout in ms
+        returnedCommandId || commandId // use returned command ID or fallback to original
       );
+      
+      console.log('✅ Issuance completion result:', JSON.stringify(completion, null, 2));
+      
+      if (!completion) {
+        throw new Error('Failed to get issuance completion result');
+      }
+      
+      // Use completion as the result (this should contain the contract events)
+      const result = completion;
 
       if (!result) {
         throw new Error('Failed to execute token issuance');
@@ -537,7 +674,7 @@ class CantonConsoleService {
 
       const wallets = await this.sdk.userLedger?.listWallets();
       console.log('✅ Canton connection test successful:', { walletCount: wallets?.length || 0 });
-      
+
       return {
         connected: true,
         walletCount: wallets?.length || 0,

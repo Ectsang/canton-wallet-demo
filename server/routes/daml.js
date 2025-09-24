@@ -220,9 +220,10 @@ export default async function damlRoutes(app) {
         properties: {
           instrumentId: { type: 'string', description: 'Instrument contract ID' },
           owner: { type: 'string', description: 'Token recipient party ID' },
-          amount: { type: 'number', minimum: 0, description: 'Amount to mint' }
+          amount: { type: 'number', minimum: 0, description: 'Amount to mint' },
+          admin: { type: 'string', description: 'Admin party ID (who can exercise Issue choice)' }
         },
-        required: ['instrumentId', 'owner', 'amount'],
+        required: ['instrumentId', 'owner', 'amount', 'admin'],
         additionalProperties: false
       },
       response: {
@@ -248,15 +249,16 @@ export default async function damlRoutes(app) {
     }
   }, async (req, reply) => {
     try {
-      const { instrumentId, owner, amount } = req.body;
+      const { instrumentId, owner, amount, admin } = req.body;
       
-      req.log.info({ instrumentId, owner, amount }, 'Issuing tokens via DAML Issue choice');
+      req.log.info({ instrumentId, owner, amount, admin }, 'Issuing tokens via DAML Issue choice');
       
       const service = await getDamlService();
       const result = await service.issueTokens({
         instrumentId,
         owner,
-        amount
+        amount,
+        admin
       });
       
       req.log.info({ holdingId: result.contractId, amount }, 'Tokens issued successfully');
