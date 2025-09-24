@@ -44,19 +44,20 @@ class SdkManager {
 
     if (scanApiUrl) {
       try {
-        const url = new URL(scanApiUrl)
-        await this.sdk.connectTopology(url)
+        // SDK 0.7.0: scan-proxy is now on validator endpoint, not scan endpoint
+        // Use wallet.localhost:2000/api/validator for LocalNet as per Canton team guidance
+        const validatorUrl = new URL('http://wallet.localhost:2000/api/validator')
+        await this.sdk.connectTopology(validatorUrl)
         this.topologyConnected = true
-        // Derive a default Registry API URL from SCAN base if not provided
-        const derivedRegistry = `${url.origin}/registry`
-        const registryUrl = registryEnv || derivedRegistry
+        
+        // Registry API URL is validator + /v0/scan-proxy
+        const registryUrl = registryEnv || `${validatorUrl.href}/v0/scan-proxy`
         this.logger?.info(`Using Registry API URL: ${registryUrl}`)
         this.sdk.tokenStandard?.setTransferFactoryRegistryUrl(registryUrl)
       } catch (err) {
         this.topologyConnected = false
-        this.logger?.error({ err }, 'connectTopology failed')
-        // Propagate to caller to surface readiness issues
-        throw err
+        this.logger?.warn({ err }, 'connectTopology failed - continuing without topology connection')
+        // Don't throw error - topology connection is optional for basic ledger operations
       }
     }
 

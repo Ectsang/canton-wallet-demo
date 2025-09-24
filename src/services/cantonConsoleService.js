@@ -174,8 +174,10 @@ class CantonConsoleService {
       console.log('📋 Preparing REAL DAML submission with correct format:', { commands });
 
       // Use SDK 0.7.0 new API - setPartyId handles all setup automatically
-      await this.sdk.setPartyId(admin);
-      console.log('🔧 Set party ID on SDK 0.7.0 (auto-configures synchronizer):', admin);
+      // Use the actual synchronizer ID from LocalNet
+      const synchronizerId = 'global-domain::12200331920f4dc92981db2f8dd3b4fa2c9885eba83bf6c09fe9936d9097463baa2a';
+      await this.sdk.setPartyId(admin, synchronizerId);
+      console.log('🔧 Set party ID on SDK 0.7.0 with explicit synchronizer ID:', { admin, synchronizerId });
 
       // Use prepareSubmission with the correctly formatted commands and command ID
       const commandId = uuidv4(); // Generate unique command ID
@@ -305,8 +307,10 @@ class CantonConsoleService {
       console.log('📋 Preparing REAL DAML exercise with correct format:', { commands });
 
       // Use SDK 0.7.0 new API - setPartyId handles all setup automatically
-      await this.sdk.setPartyId(owner);
-      console.log('🔧 Set party ID on SDK 0.7.0 for token issuance:', owner);
+      // Use the actual synchronizer ID from LocalNet
+      const synchronizerId = 'global-domain::12200331920f4dc92981db2f8dd3b4fa2c9885eba83bf6c09fe9936d9097463baa2a';
+      await this.sdk.setPartyId(owner, synchronizerId);
+      console.log('🔧 Set party ID on SDK 0.7.0 for token issuance with explicit synchronizer ID:', { owner, synchronizerId });
 
       // Use prepareSubmission with the correctly formatted commands and command ID
       const commandId = uuidv4(); // Generate unique command ID
@@ -382,7 +386,9 @@ class CantonConsoleService {
       });
 
       // Use SDK 0.7.0 new API - setPartyId handles all setup automatically
-      await this.sdk.setPartyId(partyId);
+      // Use the actual synchronizer ID from LocalNet
+      const synchronizerId = 'global-domain::12200331920f4dc92981db2f8dd3b4fa2c9885eba83bf6c09fe9936d9097463baa2a';
+      await this.sdk.setPartyId(partyId, synchronizerId);
 
       // Get ledger end to determine current offset
       console.log('🔄 Getting ledger end...');
@@ -477,7 +483,9 @@ class CantonConsoleService {
       console.log('🔄 Listing REAL holdings with Canton SDK...', { partyId, packageId: this.minimalTokenPackageId });
 
       // Use SDK 0.7.0 new API - setPartyId handles all setup automatically
-      await this.sdk.setPartyId(partyId);
+      // Use the actual synchronizer ID from LocalNet
+      const synchronizerId = 'global-domain::12200331920f4dc92981db2f8dd3b4fa2c9885eba83bf6c09fe9936d9097463baa2a';
+      await this.sdk.setPartyId(partyId, synchronizerId);
 
       // Get ledger end to determine current offset
       const ledgerEnd = await this.sdk.userLedger?.ledgerEnd();
