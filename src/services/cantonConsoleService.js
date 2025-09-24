@@ -243,102 +243,94 @@ class CantonConsoleService {
         console.log('🔍 Using updateId:', result.updateId);
         
         // Query transaction events using the updateId to get the contract ID
+        // Based on REFERENCE.md: Use JSON Ledger API /v2/updates/update-by-id to get transaction events
         try {
-          console.log('🔄 Querying transaction by updateId...');
-          console.log('🔍 Available SDK methods:');
-          console.log('  - tokenStandard methods:', this.sdk.tokenStandard ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.sdk.tokenStandard)) : 'not available');
-          console.log('  - userLedger methods:', this.sdk.userLedger ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.sdk.userLedger)) : 'not available');
+          console.log('🔄 Querying transaction events using JSON Ledger API...');
+          console.log('🔍 Using updateId:', result.updateId);
           
-          // Try multiple approaches to get the transaction
-          let transactionById = null;
+          // Use JSON Ledger API directly to get transaction with events
+          // This is the approach documented in REFERENCE.md for extracting contract IDs
+          const ledgerApiUrl = process.env.JSON_API_URL || 'http://localhost:2975';
+          const authToken = process.env.UNSAFE_AUTH_TOKEN || 'unsafe';
           
-          // Approach 1: Use tokenStandard.getTransactionById (SDK 0.7.0)
-          if (this.sdk.tokenStandard?.getTransactionById) {
-            try {
-              console.log('🔄 Trying tokenStandard.getTransactionById...');
-              transactionById = await this.sdk.tokenStandard.getTransactionById(result.updateId);
-              console.log('📋 TokenStandard getTransactionById result:', JSON.stringify(transactionById, null, 2));
-            } catch (e) {
-              console.log('⚠️ TokenStandard getTransactionById failed:', e);
-              console.log('⚠️ Error details:', {
-                message: e.message,
-                code: e.code,
-                cause: e.cause,
-                stack: e.stack
-              });
-            }
-          }
+          console.log('🔄 Calling JSON Ledger API /v2/updates/update-by-id...');
           
-          // Approach 2: Try listHoldingTransactions to see recent transactions
-          if (!transactionById && this.sdk.tokenStandard?.listHoldingTransactions) {
-            try {
-              console.log('🔄 Trying listHoldingTransactions to find recent transactions...');
-              const recentTransactions = await this.sdk.tokenStandard.listHoldingTransactions(result.offset - 5, result.offset + 5);
-              console.log('📋 Recent transactions around offset:', JSON.stringify(recentTransactions, null, 2));
-              
-              // Look for our transaction in the list
-              if (recentTransactions && Array.isArray(recentTransactions)) {
-                const ourTransaction = recentTransactions.find(tx => tx.updateId === result.updateId);
-                if (ourTransaction) {
-                  transactionById = ourTransaction;
-                  console.log('✅ Found our transaction in listHoldingTransactions:', JSON.stringify(ourTransaction, null, 2));
-                }
-              }
-            } catch (e) {
-              console.log('⚠️ listHoldingTransactions failed:', e.message);
-            }
-          }
-          
-          // Approach 3: Use userLedger methods if available
-          if (!transactionById && this.sdk.userLedger) {
-            try {
-              console.log('🔄 Trying userLedger methods...');
-              console.log('🔍 UserLedger available methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.sdk.userLedger)));
-              
-              // Try different userLedger methods that might help
-              if (this.sdk.userLedger.getTransactionById) {
-                transactionById = await this.sdk.userLedger.getTransactionById(result.updateId);
-                console.log('📋 UserLedger getTransactionById result:', JSON.stringify(transactionById, null, 2));
-              } else if (this.sdk.userLedger.getTransaction) {
-                transactionById = await this.sdk.userLedger.getTransaction(result.updateId);
-                console.log('📋 UserLedger getTransaction result:', JSON.stringify(transactionById, null, 2));
-              }
-            } catch (e) {
-              console.log('⚠️ UserLedger transaction query failed:', e.message);
-            }
-          }
-          
-          // Look for CreatedEvent in the transaction
-          if (transactionById?.events) {
-            for (const event of transactionById.events) {
-              if (event.created || event.CreatedEvent) {
-                finalContractId = event.created?.contractId || event.CreatedEvent?.contractId;
-                if (finalContractId) {
-                  console.log('✅ Found contract ID in transaction events:', finalContractId);
-                  break;
+          const transactionRequest = {
+            updateId: result.updateId,
+            updateFormat: {
+              includeTransactions: {
+                transactionShape: "TRANSACTION_SHAPE_LEDGER_EFFECTS",
+                eventFormat: {
+                  filtersByParty: {
+                    [admin]: {
+                      cumulative: [{
+                        identifierFilter: {
+                          WildcardFilter: {
+                            value: {
+                              includeCreatedEventBlob: true // Include created event details
+                            }
+                          }
+                        }
+                      }]
+                    }
+                  }
                 }
               }
             }
-          }
+          };
           
-          // If still no contract ID, try the transaction structure itself
-          if (!finalContractId && transactionById?.transaction) {
-            console.log('🔍 Checking transaction structure for contract ID...');
-            const tx = transactionById.transaction;
-            if (tx.events) {
-              for (const event of tx.events) {
-                if (event.created || event.CreatedEvent) {
-                  finalContractId = event.created?.contractId || event.CreatedEvent?.contractId;
-                  if (finalContractId) {
-                    console.log('✅ Found contract ID in nested transaction events:', finalContractId);
+          console.log('📋 Transaction request:', JSON.stringify(transactionRequest, null, 2));
+          
+          const response = await fetch(`${ledgerApiUrl}/v2/updates/update-by-id`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify(transactionRequest)
+          });
+          
+          if (!response.ok) {
+            console.log('❌ JSON Ledger API request failed:', response.status, response.statusText);
+            const errorText = await response.text();
+            console.log('❌ Error response:', errorText);
+          } else {
+            const transactionData = await response.json();
+            console.log('✅ JSON Ledger API response:', JSON.stringify(transactionData, null, 2));
+            
+            // Parse the transaction events to find CreatedEvent for our contract
+            // Based on REFERENCE.md: "Find all CreatedEvents in that range"
+            if (transactionData?.update?.Transaction?.value?.events) {
+              const events = transactionData.update.Transaction.value.events;
+              console.log('🔍 Found', events.length, 'events in transaction');
+              
+              for (const event of events) {
+                console.log('🔍 Checking event:', JSON.stringify(event, null, 2));
+                
+                // Look for CreatedEvent that matches our Instrument template
+                if (event.CreatedEvent) {
+                  const createdEvent = event.CreatedEvent;
+                  const templateId = createdEvent.templateId;
+                  
+                  console.log('✅ Found CreatedEvent with templateId:', templateId);
+                  console.log('✅ Contract ID:', createdEvent.contractId);
+                  
+                  // Check if this is our MinimalToken:Instrument contract
+                  if (templateId && templateId.includes('MinimalToken:Instrument')) {
+                    finalContractId = createdEvent.contractId;
+                    console.log('🎉 FOUND REAL CONTRACT ID:', finalContractId);
                     break;
                   }
                 }
               }
             }
           }
-        } catch (queryError) {
-          console.log('❌ Transaction query failed:', queryError);
+        } catch (apiError) {
+          console.log('❌ JSON Ledger API call failed:', apiError);
+          console.log('❌ API Error details:', {
+            message: apiError.message,
+            stack: apiError.stack
+          });
         }
         
         // Approach 3: Query active contracts with the correct parameters
