@@ -3,7 +3,7 @@
  * Uses the official Canton Wallet SDK for all operations
  */
 
-import { 
+import {
   WalletSDKImpl,
   localNetAuthDefault,
   localNetLedgerDefault,
@@ -173,8 +173,13 @@ class CantonConsoleService {
 
       console.log('📋 Preparing REAL DAML submission with correct format:', { commands });
 
-      // Use prepareSubmission with the correctly formatted commands
-      const prepared = await this.sdk.userLedger?.prepareSubmission(commands);
+      // Use SDK 0.7.0 new API - setPartyId handles all setup automatically
+      await this.sdk.setPartyId(admin);
+      console.log('🔧 Set party ID on SDK 0.7.0 (auto-configures synchronizer):', admin);
+
+      // Use prepareSubmission with the correctly formatted commands and command ID
+      const commandId = uuidv4(); // Generate unique command ID
+      const prepared = await this.sdk.userLedger?.prepareSubmission(commands, commandId);
       
       if (!prepared) {
         throw new Error('Failed to prepare submission for Instrument creation');
@@ -182,10 +187,17 @@ class CantonConsoleService {
 
       console.log('✅ Prepared submission:', prepared);
 
-      // Get the wallet keys for signing
-      const walletKeys = this.walletKeys.get(admin);
+      // Get the wallet keys for signing - generate if not exists
+      let walletKeys = this.walletKeys.get(admin);
       if (!walletKeys) {
-        throw new Error(`No wallet keys found for party: ${admin}`);
+        console.log(`⚠️  No wallet keys found for party: ${admin}, generating new keys`);
+        const keyPair = createKeyPair();
+        walletKeys = {
+          privateKey: keyPair.privateKey,
+          publicKey: keyPair.publicKey
+        };
+        this.walletKeys.set(admin, walletKeys);
+        console.log('🔑 Generated keys for admin party');
       }
 
       // Sign the prepared transaction hash
@@ -196,12 +208,13 @@ class CantonConsoleService {
 
       console.log('🔐 Signed transaction hash');
 
-      // Execute the submission with signature
+      // Execute the submission with signature and separate submission ID
+      const submissionId = uuidv4(); // Generate unique submission ID for execution
       const result = await this.sdk.userLedger?.executeSubmission(
         prepared,
         signature,
         walletKeys.publicKey,
-        prepared.submissionId
+        submissionId
       );
 
       if (!result) {
@@ -222,29 +235,38 @@ class CantonConsoleService {
         finalContractId = `instrument-${Date.now()}`;
       }
 
-      return {
-        contractId: finalContractId,
-        admin,
-        name,
-        symbol,
-        decimals: parseInt(decimals, 10),
-        transactionId: result?.transactionId || `tx-${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        templateId: `${this.minimalTokenPackageId}:MinimalToken:Instrument`,
-        isRealContract: true,
-        ledgerLocation: 'Splice LocalNet (Real DAML Contract)',
-        packageId: this.minimalTokenPackageId
-      };
-    } catch (error) {
-      console.error('❌ Failed to create REAL Instrument contract:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-        cause: error.cause
-      });
-      throw error;
-    }
+        return {
+          contractId: finalContractId,
+          admin,
+          name,
+          symbol,
+          decimals: parseInt(decimals, 10),
+          transactionId: result?.transactionId || `tx-${Date.now()}`,
+          createdAt: new Date().toISOString(),
+          templateId: `${this.minimalTokenPackageId}:MinimalToken:Instrument`,
+          isRealContract: true,
+          ledgerLocation: 'Splice LocalNet (Real DAML Contract)',
+          packageId: this.minimalTokenPackageId
+        };
+        } catch (error) {
+          console.error('❌ Failed to create REAL Instrument contract:', error);
+          console.error('❌ Error details:', {
+            message: error.message,
+            stack: error.stack,
+            name: error.name,
+            cause: error.cause,
+            response: error.response?.data || error.response,
+            status: error.response?.status,
+            statusText: error.response?.statusText
+          });
+          
+          // Try to extract more specific error information
+          if (error.response?.data) {
+            console.error('❌ Response data:', JSON.stringify(error.response.data, null, 2));
+          }
+          
+          throw error;
+        }
   }
 
   /**
@@ -282,8 +304,13 @@ class CantonConsoleService {
 
       console.log('📋 Preparing REAL DAML exercise with correct format:', { commands });
 
-      // Use prepareSubmission with the correctly formatted commands
-      const prepared = await this.sdk.userLedger?.prepareSubmission(commands);
+      // Use SDK 0.7.0 new API - setPartyId handles all setup automatically
+      await this.sdk.setPartyId(owner);
+      console.log('🔧 Set party ID on SDK 0.7.0 for token issuance:', owner);
+
+      // Use prepareSubmission with the correctly formatted commands and command ID
+      const commandId = uuidv4(); // Generate unique command ID
+      const prepared = await this.sdk.userLedger?.prepareSubmission(commands, commandId);
       
       if (!prepared) {
         throw new Error('Failed to prepare submission for token issuance');
@@ -305,12 +332,13 @@ class CantonConsoleService {
 
       console.log('🔐 Signed exercise transaction hash');
 
-      // Execute the submission with signature
+      // Execute the submission with signature and separate submission ID
+      const submissionId = uuidv4(); // Generate unique submission ID for execution
       const result = await this.sdk.userLedger?.executeSubmission(
         prepared,
         signature,
         walletKeys.publicKey,
-        prepared.submissionId
+        submissionId
       );
 
       if (!result) {
@@ -352,6 +380,9 @@ class CantonConsoleService {
       console.log('🔄 Querying balance with Canton SDK...', {
         partyId, instrumentId
       });
+
+      // Use SDK 0.7.0 new API - setPartyId handles all setup automatically
+      await this.sdk.setPartyId(partyId);
 
       // Get ledger end to determine current offset
       console.log('🔄 Getting ledger end...');
@@ -444,6 +475,9 @@ class CantonConsoleService {
       }
 
       console.log('🔄 Listing REAL holdings with Canton SDK...', { partyId, packageId: this.minimalTokenPackageId });
+
+      // Use SDK 0.7.0 new API - setPartyId handles all setup automatically
+      await this.sdk.setPartyId(partyId);
 
       // Get ledger end to determine current offset
       const ledgerEnd = await this.sdk.userLedger?.ledgerEnd();
