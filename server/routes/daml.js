@@ -242,7 +242,11 @@ export default async function damlRoutes(app) {
           type: 'object',
           properties: {
             error: { type: 'string' },
-            message: { type: 'string' }
+            message: { type: 'string' },
+            details: { 
+              type: 'object',
+              additionalProperties: true
+            }
           }
         }
       }
@@ -265,10 +269,22 @@ export default async function damlRoutes(app) {
       
       return reply.send(result);
     } catch (error) {
-      req.log.error({ error: error.message }, 'Failed to issue tokens');
+      req.log.error({ 
+        error: error.message, 
+        stack: error.stack,
+        name: error.name,
+        cause: error.cause 
+      }, 'Failed to issue tokens');
+      
+      // Return detailed error for debugging
       return reply.code(400).send({
         error: 'TokenIssuanceFailed',
-        message: error.message
+        message: error.message || 'Unknown error',
+        details: {
+          name: error.name,
+          stack: error.stack?.split('\n').slice(0, 3).join('\n'), // First 3 lines of stack
+          cause: error.cause
+        }
       });
     }
   });

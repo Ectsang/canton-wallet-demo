@@ -424,9 +424,12 @@ class CantonConsoleService {
         }
         
         if (!finalContractId) {
-          console.log('⚠️ All contract ID extraction methods failed, using updateId as fallback...');
-          finalContractId = result.updateId; // Use updateId as fallback
-          console.log('🔧 Using updateId as fallback contract ID:', finalContractId);
+          console.log('❌ CRITICAL: All contract ID extraction methods failed!');
+          console.log('❌ JSON Ledger API failed');
+          console.log('❌ ActiveContracts query failed');
+          console.log('❌ No contract ID found in completion result');
+          console.log('❌ UpdateId available:', result.updateId);
+          throw new Error('Failed to extract real contract ID from transaction. Cannot proceed with invalid contract ID format.');
         }
       } else if (!finalContractId) {
         throw new Error('Failed to extract contract ID - no updateId available in completion result.');
@@ -513,10 +516,18 @@ class CantonConsoleService {
       console.log('🔧 Set party ID on SDK 0.7.0 for token issuance with explicit synchronizer ID:', { adminParty, synchronizerId });
 
       // Get the wallet keys for signing (using the admin's keys since admin exercises the Issue choice)
+      console.log('🔍 DEBUG: Looking for wallet keys for admin party:', adminParty);
+      console.log('🔍 DEBUG: Available keys in walletKeys Map:', Array.from(this.walletKeys.keys()));
+      console.log('🔍 DEBUG: Total keys stored:', this.walletKeys.size);
+      
       const walletKeys = this.walletKeys.get(adminParty);
       if (!walletKeys) {
+        console.log('❌ DEBUG: No keys found for party:', adminParty);
+        console.log('❌ DEBUG: All stored keys:', Array.from(this.walletKeys.entries()).map(([k, v]) => ({ party: k, hasPrivateKey: !!v.privateKey, hasPublicKey: !!v.publicKey })));
         throw new Error(`No wallet keys found for admin party: ${adminParty}`);
       }
+      
+      console.log('✅ DEBUG: Found wallet keys for party:', adminParty);
 
       // Use SDK 0.7.0 prepareSignAndExecuteTransaction method (simpler than manual prepare/sign/execute)
       const commandId = uuidv4(); // Generate unique command ID
