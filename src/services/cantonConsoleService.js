@@ -197,13 +197,13 @@ class CantonConsoleService {
       console.log('🔄 Waiting for completion with params:', {
         offsetLatest,
         timeout: 5000,
-        commandId: returnedCommandId || commandId
+        commandId: returnedCommandId
       });
       
       const completion = await this.sdk.userLedger?.waitForCompletion(
         offsetLatest, // where to start from
         5000, // timeout in ms
-        returnedCommandId || commandId // use returned command ID or fallback to original
+        returnedCommandId // ✅ FIXED: Use the returned command ID directly
       );
       
       console.log('✅ Command completion result:', JSON.stringify(completion, null, 2));
@@ -285,101 +285,57 @@ class CantonConsoleService {
           });
         }
         
-        // FALLBACK METHOD: Try JSON Ledger API if activeContracts failed
+        // PREFERRED METHOD: Use Canton Wallet SDK getTransactionById
         if (!finalContractId) {
-          console.log('🔄 ActiveContracts failed, trying JSON Ledger API...');
+          console.log('🔄 ActiveContracts failed, trying SDK getTransactionById...');
           console.log('🔍 Using updateId:', result.updateId);
         
-        // Query transaction events using the updateId to get the contract ID
-        // Based on REFERENCE.md: Use JSON Ledger API /v2/updates/update-by-id to get transaction events
         try {
-          console.log('🔄 Querying transaction events using JSON Ledger API...');
-          console.log('🔍 Using updateId:', result.updateId);
+          console.log('🔄 Using SDK tokenStandard.getTransactionById method...');
+          console.log('🔍 UpdateId:', result.updateId);
           
-          // Use JSON Ledger API directly to get transaction with events
-          // This is the approach documented in REFERENCE.md for extracting contract IDs
-          const ledgerApiUrl = process.env.JSON_API_URL || 'http://localhost:2975';
-          const authToken = process.env.UNSAFE_AUTH_TOKEN || 'unsafe';
+          // Use the Canton Wallet SDK method as recommended by Canton team
+          const transaction = await this.sdk.tokenStandard?.getTransactionById(result.updateId);
           
-          console.log('🔄 Calling JSON Ledger API /v2/updates/update-by-id...');
+          console.log('🎉 SDK getTransactionById SUCCESS! Transaction received:', JSON.stringify(transaction, null, 2));
+          console.log('🔍 Transaction type:', typeof transaction);
+          console.log('🔍 Transaction keys:', transaction ? Object.keys(transaction) : 'null');
           
-          const transactionRequest = {
-            updateId: result.updateId,
-            verbose: true, // Required by JSON Ledger API despite REFERENCE.md examples
-            updateFormat: {
-              includeTransactions: {
-                transactionShape: "TRANSACTION_SHAPE_LEDGER_EFFECTS",
-                eventFormat: {
-                  filtersByParty: {
-                    [admin]: {
-                      cumulative: [{
-                        identifierFilter: {
-                          WildcardFilter: {
-                            value: {
-                              includeCreatedEventBlob: true // Include created event details
-                            }
-                          }
-                        }
-                      }]
-                    }
-                  }
-                }
-              }
-            }
-          };
-          
-          console.log('📋 Transaction request:', JSON.stringify(transactionRequest, null, 2));
-          
-          const response = await fetch(`${ledgerApiUrl}/v2/updates/update-by-id`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify(transactionRequest)
-          });
-          
-          if (!response.ok) {
-            console.log('❌ JSON Ledger API request failed:', response.status, response.statusText);
-            const errorText = await response.text();
-            console.log('❌ Error response:', errorText);
-          } else {
-            const transactionData = await response.json();
-            console.log('🎉 JSON Ledger API SUCCESS! Response received:', JSON.stringify(transactionData, null, 2));
+          // Parse the transaction events to find CreatedEvent for our contract
+          if (transaction?.events && transaction.events.length > 0) {
+            console.log('🔍 Found', transaction.events.length, 'events in transaction');
             
-            // Parse the transaction events to find CreatedEvent for our contract
-            // Based on REFERENCE.md: "Find all CreatedEvents in that range"
-            if (transactionData?.update?.Transaction?.value?.events) {
-              const events = transactionData.update.Transaction.value.events;
-              console.log('🔍 Found', events.length, 'events in transaction');
+            for (const event of transaction.events) {
+              console.log('🔍 Checking event:', JSON.stringify(event, null, 2));
               
-              for (const event of events) {
-                console.log('🔍 Checking event:', JSON.stringify(event, null, 2));
+              // Look for CreatedEvent that matches our Instrument template
+              if (event.CreatedEvent || event.created) {
+                const createdEvent = event.CreatedEvent || event.created;
+                const templateId = createdEvent.templateId;
+                const contractId = createdEvent.contractId;
                 
-                // Look for CreatedEvent that matches our Instrument template
-                if (event.CreatedEvent) {
-                  const createdEvent = event.CreatedEvent;
-                  const templateId = createdEvent.templateId;
-                  
-                  console.log('✅ Found CreatedEvent with templateId:', templateId);
-                  console.log('✅ Contract ID:', createdEvent.contractId);
-                  
-                  // Check if this is our MinimalToken:Instrument contract
-                  if (templateId && templateId.includes('MinimalToken:Instrument')) {
-                    finalContractId = createdEvent.contractId;
-                    console.log('🎉 FOUND REAL CONTRACT ID:', finalContractId);
-                    break;
-                  }
+                console.log('✅ Found CreatedEvent with templateId:', templateId);
+                console.log('✅ Contract ID:', contractId);
+                
+                // Check if this is our MinimalToken:Instrument contract
+                if (templateId && templateId.includes('MinimalToken:Instrument')) {
+                  finalContractId = contractId;
+                  console.log('🎉 FOUND REAL CONTRACT ID via SDK:', finalContractId);
+                  break;
                 }
               }
             }
+          } else {
+            console.log('❌ No events found in transaction');
           }
-        } catch (apiError) {
-          console.log('❌ JSON Ledger API call failed:', apiError);
-          console.log('❌ API Error details:', {
-            message: apiError.message,
-            stack: apiError.stack
+        } catch (sdkError) {
+          console.log('❌ SDK getTransactionById failed:', sdkError);
+          console.log('❌ SDK Error details:', {
+            message: sdkError.message,
+            stack: sdkError.stack,
+            cause: sdkError.cause
           });
+          // Continue to next method if SDK fails
         }
         
         // Approach 3: Query active contracts with the correct parameters
@@ -600,7 +556,7 @@ class CantonConsoleService {
       const completion = await this.sdk.userLedger?.waitForCompletion(
         offsetLatest, // where to start from
         5000, // timeout in ms
-        returnedCommandId || commandId // use returned command ID or fallback to original
+        returnedCommandId // ✅ FIXED: Use the returned command ID directly
       );
       
       console.log('✅ Issuance completion result:', JSON.stringify(completion, null, 2));
