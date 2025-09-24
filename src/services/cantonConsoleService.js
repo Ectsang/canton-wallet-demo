@@ -487,9 +487,78 @@ class CantonConsoleService {
           console.log('❌ UpdateId available:', result.updateId);
           console.log('❌ This means we cannot get the real Canton contract ID');
           
-          // For now, let's use the updateId and document the limitation
-          console.log('⚠️ WORKAROUND: Using updateId as contract ID (known limitation)');
-          finalContractId = result.updateId;
+          // FALLBACK: Try direct gRPC Ledger API to get transaction events
+          console.log('🔄 FALLBACK: Trying direct gRPC Ledger API to get transaction events...');
+          try {
+            // Use the raw gRPC Ledger API to get transaction by updateId
+            // This bypasses all SDK abstractions and security restrictions
+            const grpcRequest = {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer unsafe' // Use unsafe auth as per LocalNet config
+              },
+              body: JSON.stringify({
+                updateId: result.updateId
+              })
+            };
+            
+            console.log('🔄 Making direct gRPC API call to get transaction events...');
+            console.log('🔍 Request:', grpcRequest);
+            
+            // Try different gRPC endpoints that might work
+            let response;
+            const endpoints = [
+              'http://localhost:2975/v1/stream/transactions-by-id',
+              'http://localhost:2975/v1/transactions/by-id', 
+              'http://localhost:2975/v1/updates/by-id',
+              'http://localhost:2901/v1/transactions/by-id', // Direct ledger API
+              'http://localhost:2901/v1/updates/by-id'
+            ];
+            
+            for (const endpoint of endpoints) {
+              console.log(`🔄 Trying endpoint: ${endpoint}`);
+              try {
+                response = await fetch(endpoint, grpcRequest);
+                if (response.ok) {
+                  console.log(`✅ Endpoint ${endpoint} responded successfully`);
+                  break;
+                } else {
+                  console.log(`❌ Endpoint ${endpoint} failed: ${response.status}`);
+                }
+              } catch (endpointError) {
+                console.log(`❌ Endpoint ${endpoint} error:`, endpointError.message);
+              }
+            }
+            
+            if (response.ok) {
+              const transactionData = await response.json();
+              console.log('🎉 Direct gRPC API SUCCESS! Transaction data:', JSON.stringify(transactionData, null, 2));
+              
+              // Parse the transaction data to extract contract IDs
+              if (transactionData.events) {
+                for (const event of transactionData.events) {
+                  if (event.created && event.created.contractId) {
+                    finalContractId = event.created.contractId;
+                    console.log('🎉 FOUND REAL CONTRACT ID via direct gRPC:', finalContractId);
+                    break;
+                  }
+                }
+              }
+            } else {
+              console.log('❌ Direct gRPC API failed:', response.status, response.statusText);
+              const errorText = await response.text();
+              console.log('❌ Error response:', errorText);
+            }
+          } catch (grpcError) {
+            console.log('❌ Direct gRPC API failed:', grpcError.message);
+          }
+          
+          // If still no contract ID, use updateId as last resort
+          if (!finalContractId) {
+            console.log('⚠️ FINAL WORKAROUND: Using updateId as contract ID (known limitation)');
+            finalContractId = result.updateId;
+          }
         }
       } else if (!finalContractId) {
         throw new Error('Failed to extract contract ID - no updateId available in completion result.');
