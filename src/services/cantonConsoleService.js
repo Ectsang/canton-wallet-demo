@@ -257,7 +257,6 @@ class CantonConsoleService {
           
           const transactionRequest = {
             updateId: result.updateId,
-            verbose: true, // Required field that was missing
             updateFormat: {
               includeTransactions: {
                 transactionShape: "TRANSACTION_SHAPE_LEDGER_EFFECTS",
@@ -533,6 +532,22 @@ class CantonConsoleService {
       };
     } catch (error) {
       console.error('❌ Failed to issue REAL tokens:', error);
+      console.error('❌ Minting error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        cause: error.cause,
+        code: error.code,
+        response: error.response?.data || error.response,
+        status: error.response?.status,
+        statusText: error.response?.statusText
+      });
+      
+      // Try to extract more specific error information
+      if (error.response?.data) {
+        console.error('❌ Minting response data:', JSON.stringify(error.response.data, null, 2));
+      }
+      
       throw error;
     }
   }
