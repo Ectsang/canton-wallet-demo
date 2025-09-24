@@ -233,14 +233,62 @@ class CantonConsoleService {
         }
       }
       
-      // Check if contractId is at the top level of result
-      if (!finalContractId && result?.contractId) {
-        finalContractId = result.contractId;
-      }
+      // SKIP checking contractId at top level - it's usually updateId, not real contractId
+      // Always use JSON Ledger API to get the real contract ID from transaction events
+      console.log('🔄 FORCING JSON Ledger API to get real contract ID (skipping completion result contractId)');
       
-      if (!finalContractId && result?.updateId) {
-        console.log('⚠️  No contract ID found in completion result, querying transaction events...');
-        console.log('🔍 Using updateId:', result.updateId);
+      if (result?.updateId) { // FORCE: Always try to get real contract ID
+        console.log('🔄 Trying to extract real contract ID using activeContracts query...');
+        
+        // PRIMARY METHOD: Use activeContracts to find the newly created contract
+        try {
+          const instrumentTemplateId = `${this.minimalTokenPackageId}:MinimalToken:Instrument`;
+          
+          console.log('🔄 Querying activeContracts for template:', instrumentTemplateId);
+          console.log('🔄 Admin party:', admin);
+          
+          // Simplified activeContracts query - don't use offset or parties filter to avoid errors
+          const activeContracts = await this.sdk.userLedger?.activeContracts({
+            templateIds: [instrumentTemplateId]
+          });
+          
+          console.log(`📋 Found ${activeContracts?.length || 0} total Instrument contracts`);
+          
+          if (activeContracts?.length > 0) {
+            // Find the contract created by this admin party (should be the most recent one)
+            const adminContracts = activeContracts.filter(contract => {
+              const payload = contract.payload || contract.createArguments || contract.arguments;
+              console.log('🔍 Contract payload admin:', payload?.admin, 'vs expected:', admin);
+              return payload?.admin === admin;
+            });
+            
+            console.log(`📊 Found ${adminContracts.length} contracts for admin: ${admin}`);
+            
+            if (adminContracts.length > 0) {
+              // Use the most recent contract (should be the one we just created)
+              const latestContract = adminContracts[adminContracts.length - 1];
+              finalContractId = latestContract.contractId;
+              console.log('🎉 SUCCESS: Found real contract ID via activeContracts:', finalContractId);
+              console.log('📋 Contract details:', JSON.stringify(latestContract, null, 2));
+            } else {
+              console.log('❌ No contracts found for admin party:', admin);
+            }
+          } else {
+            console.log('❌ No active Instrument contracts found');
+          }
+        } catch (activeError) {
+          console.log('❌ ActiveContracts query failed:', activeError);
+          console.log('❌ Error details:', {
+            message: activeError.message,
+            code: activeError.code,
+            cause: activeError.cause
+          });
+        }
+        
+        // FALLBACK METHOD: Try JSON Ledger API if activeContracts failed
+        if (!finalContractId) {
+          console.log('🔄 ActiveContracts failed, trying JSON Ledger API...');
+          console.log('🔍 Using updateId:', result.updateId);
         
         // Query transaction events using the updateId to get the contract ID
         // Based on REFERENCE.md: Use JSON Ledger API /v2/updates/update-by-id to get transaction events
@@ -257,7 +305,7 @@ class CantonConsoleService {
           
           const transactionRequest = {
             updateId: result.updateId,
-            verbose: true, // Add the missing required field
+            verbose: true, // Required by JSON Ledger API despite REFERENCE.md examples
             updateFormat: {
               includeTransactions: {
                 transactionShape: "TRANSACTION_SHAPE_LEDGER_EFFECTS",
@@ -423,13 +471,16 @@ class CantonConsoleService {
           }
         }
         
+        }
+        
         if (!finalContractId) {
           console.log('❌ CRITICAL: All contract ID extraction methods failed!');
-          console.log('❌ JSON Ledger API failed');
           console.log('❌ ActiveContracts query failed');
+          console.log('❌ JSON Ledger API failed');
           console.log('❌ No contract ID found in completion result');
           console.log('❌ UpdateId available:', result.updateId);
-          throw new Error('Failed to extract real contract ID from transaction. Cannot proceed with invalid contract ID format.');
+          console.log('❌ This means we cannot get the real Canton contract ID');
+          throw new Error('CRITICAL: Failed to extract real contract ID from transaction. Both activeContracts and JSON Ledger API failed. Cannot proceed with invalid contract ID format.');
         }
       } else if (!finalContractId) {
         throw new Error('Failed to extract contract ID - no updateId available in completion result.');
