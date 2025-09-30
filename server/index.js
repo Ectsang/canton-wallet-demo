@@ -5,6 +5,7 @@ import swaggerUI from '@fastify/swagger-ui'
 import dotenv from 'dotenv'
 import initRoutes from './routes/init.js'
 import damlRoutes from './routes/daml.js'
+import cnQuickstartRoutes from './routes/cnQuickstartRoutes.js'
 import sdkManager from './sdkManager.js'
 
 dotenv.config({ path: '.env.server' })
@@ -47,6 +48,7 @@ sdkManager.setLogger(app.log)
 
 await initRoutes(app)
 await damlRoutes(app)
+await cnQuickstartRoutes(app)
 
 app.get('/api/health', async (req, reply) => {
   return {

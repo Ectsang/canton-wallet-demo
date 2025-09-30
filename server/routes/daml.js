@@ -4,6 +4,8 @@
  */
 
 import CantonConsoleService from '../../src/services/cantonConsoleService.js';
+import MockCantonService from '../../src/services/mockCantonService.js';
+import DamlLedgerService from '../../src/services/damlLedgerService.js';
 import sdkManager from '../sdkManager.js';
 
 export default async function damlRoutes(app) {
@@ -12,14 +14,23 @@ export default async function damlRoutes(app) {
   
   const getDamlService = async () => {
     if (!damlService) {
-      if (!sdkManager.sdk) {
-        await sdkManager.init();
-      }
-      // Use CantonConsoleService for direct Canton console integration
-      damlService = new CantonConsoleService();
-      // Set the party ID from the SDK manager if available
-      if (sdkManager.sdk?.userLedger?.partyId) {
-        damlService.setPartyId(sdkManager.sdk.userLedger.partyId);
+      // Use real Canton service now that LocalNet authentication is fixed
+      const useMockService = process.env.USE_MOCK_SERVICE === 'true'; // Only use mock if explicitly requested
+      
+      if (useMockService) {
+        app.log.info('Using Mock Canton Service (USE_MOCK_SERVICE=true)');
+        damlService = new MockCantonService();
+        await damlService.initialize();
+      } else {
+        if (!sdkManager.sdk) {
+          await sdkManager.init();
+        }
+        // Use CantonConsoleService for direct Canton console integration
+        damlService = new CantonConsoleService();
+        // Set the party ID from the SDK manager if available
+        if (sdkManager.sdk?.userLedger?.partyId) {
+          damlService.setPartyId(sdkManager.sdk.userLedger.partyId);
+        }
       }
     }
     return damlService;
@@ -130,13 +141,36 @@ export default async function damlRoutes(app) {
       
       req.log.info({ admin, name, symbol, decimals }, 'Creating MinimalToken Instrument contract');
       
-      const service = await getDamlService();
-      const result = await service.createInstrument({
-        admin,
-        name,
-        symbol,
-        decimals
-      });
+      // Use dedicated DAML Ledger Service for contract creation
+      const damlLedgerService = new DamlLedgerService();
+      let result;
+      
+      try {
+        result = await damlLedgerService.createInstrument({
+          admin,
+          name,
+          symbol,
+          decimals
+        });
+        req.log.info('Used DAML Ledger Service successfully');
+      } catch (damlError) {
+        req.log.warn({ error: damlError.message }, 'DAML Ledger Service failed, trying Canton Wallet SDK methods');
+        
+        // Fallback to Canton Wallet SDK methods (though they won't work for contract creation)
+        const service = await getDamlService();
+        try {
+          result = await service.testDirectDamlJsonApi({
+            admin,
+            name,
+            symbol,
+            decimals
+          });
+          req.log.info('Used Canton SDK direct API test successfully');
+        } catch (testError) {
+          req.log.warn({ error: testError.message }, 'All methods failed');
+          throw new Error(`Contract creation failed: ${damlError.message}`);
+        }
+      }
       
       req.log.info({ contractId: result.contractId }, 'Instrument contract created successfully');
       

@@ -166,7 +166,8 @@ class FrontendCantonService {
         body: JSON.stringify({
           instrumentId: tokenId,
           owner: this.partyId,
-          amount: amount
+          amount: amount,
+          admin: this.partyId  // Admin is the same as owner for this demo
         })
       });
 

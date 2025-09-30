@@ -45,8 +45,8 @@ class SdkManager {
     if (scanApiUrl) {
       try {
         // SDK 0.7.0: scan-proxy is now on validator endpoint, not scan endpoint
-        // Use wallet.localhost:2000/api/validator for LocalNet as per Canton team guidance
-        const validatorUrl = new URL('http://wallet.localhost:2000/api/validator')
+        // Use localhost:2903/api/validator for CN Quickstart LocalNet
+        const validatorUrl = new URL('http://localhost:2903/api/validator')
         await this.sdk.connectTopology(validatorUrl)
         this.topologyConnected = true
         

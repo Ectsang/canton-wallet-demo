@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import FrontendCantonService from './services/frontendCantonService';
+import CNQuickstartFrontendService from './services/cnQuickstartFrontendService';
 import storageService from './services/storageService';
 
-// Real Canton Network integration using DAML contracts via backend API
-const cantonService = new FrontendCantonService();
-console.log('🎯 Real Canton Integration: Frontend calling backend for DAML contracts');
+// CN Quickstart integration using direct JSON Ledger API via backend
+const cantonService = new CNQuickstartFrontendService();
+console.log('🎯 CN Quickstart Integration: Frontend calling backend for direct JSON Ledger API');
 
 function App() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -15,7 +15,7 @@ function App() {
   
   // Wallet state
   const [wallet, setWallet] = useState(null);
-  const [partyHint, setPartyHint] = useState('my-wallet-demo');
+  const [partyHint, setPartyHint] = useState('quickstart-e-1');
   
   // Token state
   const [tokenName, setTokenName] = useState('Demo Token');
@@ -36,16 +36,17 @@ function App() {
       setLoading(true);
       setError('');
       
-      // Initialize Canton service
-      await cantonService.initialize();
+      // Initialize CN Quickstart connection
+      const initResult = await cantonService.initialize();
       setIsInitialized(true);
+      setIsConnected(true);
       
       // Load existing wallet and token data
       await loadExistingData();
       
-      setSuccess('App initialized successfully');
+      setSuccess(`Connected to CN Quickstart: ${initResult.appProviderParty}`);
     } catch (err) {
-      setError(`Failed to initialize app: ${err.message}`);
+      setError(`Failed to initialize CN Quickstart: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -57,8 +58,7 @@ function App() {
       const savedWallet = storageService.loadWallet();
       if (savedWallet) {
         setWallet(savedWallet);
-        cantonService.setPartyId(savedWallet.partyId);
-        setPartyHint(savedWallet.partyHint || 'my-wallet-demo');
+        setPartyHint(savedWallet.partyHint || 'quickstart-e-1');
         console.log('✅ Loaded existing wallet from storage');
       }
 
@@ -83,25 +83,36 @@ function App() {
 
   const loadTokenBalance = async (partyId, tokenId) => {
     try {
-      const balance = await cantonService.getTokenBalance(partyId, tokenId);
-      const decimals = createdToken?.decimals || 2;
-      setTokenBalance(balance / Math.pow(10, decimals));
-      console.log('✅ Loaded current token balance:', balance);
+      const result = await cantonService.getTokenBalance(partyId, tokenId);
+      if (result.success && result.holdings.length > 0) {
+        const totalBalance = result.totalBalance || 0;
+        setTokenBalance(totalBalance);
+        console.log('✅ Loaded current token balance:', totalBalance);
+      } else {
+        setTokenBalance(0);
+      }
     } catch (error) {
       console.error('❌ Failed to load token balance:', error);
+      setTokenBalance(0);
     }
   };
 
-  const connectToNetwork = async () => {
+  const checkStatus = async () => {
     try {
       setLoading(true);
       setError('');
       setSuccess('');
-      await cantonService.connectToNetwork();
-      setIsConnected(true);
-      setSuccess('Connected to Canton Network successfully');
+      const status = await cantonService.getStatus();
+      if (status.connected) {
+        setIsConnected(true);
+        setSuccess(`Connected to CN Quickstart: ${status.appProviderParty}`);
+      } else {
+        setIsConnected(false);
+        setError('Not connected to CN Quickstart');
+      }
     } catch (err) {
-      setError(`Failed to connect: ${err.message}`);
+      setError(`Failed to check status: ${err.message}`);
+      setIsConnected(false);
     } finally {
       setLoading(false);
     }
@@ -147,7 +158,7 @@ function App() {
       // Save token to localStorage
       storageService.saveToken(token);
       
-      setSuccess('Token created and saved successfully');
+      setSuccess(`Token created successfully: ${token.contractId}`);
     } catch (err) {
       setError(`Failed to create token: ${err.message}`);
     } finally {
@@ -165,13 +176,18 @@ function App() {
         throw new Error('No token created yet');
       }
       
-      // Mint tokens to the wallet
-      await cantonService.mintTokens(
-        createdToken.tokenId || createdToken,
-        parseInt(mintAmount) * Math.pow(10, tokenDecimals)
+      if (!wallet) {
+        throw new Error('No wallet created yet');
+      }
+      
+      // Mint tokens to the wallet using CN Quickstart
+      const result = await cantonService.mintTokens(
+        createdToken.contractId,
+        wallet.partyId,
+        parseFloat(mintAmount)
       );
       
-      setSuccess(`Successfully minted ${mintAmount} ${tokenSymbol} tokens`);
+      setSuccess(`Successfully minted ${mintAmount} ${tokenSymbol} tokens (Holding: ${result.holdingId})`);
       
       // Update balance
       await updateBalance();
@@ -184,15 +200,21 @@ function App() {
 
   const updateBalance = async () => {
     try {
-      if (!createdToken) return;
+      if (!createdToken || !wallet) return;
       
-      const balance = await cantonService.getTokenBalance(
-        createdToken.tokenId || createdToken
+      const result = await cantonService.getTokenBalance(
+        wallet.partyId,
+        createdToken.contractId
       );
       
-      setTokenBalance(balance / Math.pow(10, tokenDecimals));
+      if (result.success) {
+        setTokenBalance(result.totalBalance || 0);
+      } else {
+        setTokenBalance(0);
+      }
     } catch (err) {
       console.error('Failed to update balance:', err);
+      setTokenBalance(0);
     }
   };
 
@@ -225,34 +247,33 @@ function App() {
     <div className="container">
       <div className="header">
         <h1>Canton Wallet Demo</h1>
-        <p>Create an external wallet and mint tokens using Canton Network</p>
+        <p>Create an external wallet and mint tokens using CN Quickstart LocalNet</p>
         <div className="mode-indicator real">
-          <span>🌐 <strong>CANTON LOCALNET</strong> - Real Canton Network Integration</span>
+          <span>🚀 <strong>CN QUICKSTART</strong> - Direct JSON Ledger API Integration</span>
         </div>
       </div>
 
       {error && <div className="error">{error}</div>}
       {success && <div className="success">{success}</div>}
 
-      {/* SDK Initialization */}
+      {/* CN Quickstart Initialization */}
       <div className="card">
-        <h2>1. SDK Initialization</h2>
+        <h2>1. CN Quickstart Connection</h2>
         {!isInitialized ? (
-          <p>Initializing Canton SDK...</p>
+          <p>Connecting to CN Quickstart LocalNet...</p>
         ) : (
           <>
-            <p>✅ SDK initialized</p>
-            {!isConnected && (
+            <p>✅ Connected to CN Quickstart LocalNet</p>
+            {isConnected && (
               <button 
-                className="button" 
-                onClick={connectToNetwork}
+                className="button secondary" 
+                onClick={checkStatus}
                 disabled={loading}
               >
-                Connect to Canton Network
+                Check Status
                 {loading && <span className="loading"></span>}
               </button>
             )}
-            {isConnected && <p>✅ Connected to Canton Network</p>}
           </>
         )}
       </div>
