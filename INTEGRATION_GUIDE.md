@@ -1,444 +1,699 @@
-# CN Quickstart Integration Guide
+# Canton Wallet Demo - Integration Guide
+
+## Complete Setup Guide with Custom DAML Contracts
+
+**Document Version**: 1.0
+**Date**: October 3, 2025
+**Canton Version**: 3.3.0-snapshot.20250502.13767.0.v2fc6c7e2
+**DAML Target**: 2.1
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Prerequisites](#prerequisites)
+3. [DAML Contract Design](#daml-contract-design)
+4. [Building and Uploading DARs](#building-and-uploading-dars)
+5. [Canton Multi-Participant Architecture](#canton-multi-participant-architecture)
+6. [JWT Authentication](#jwt-authentication)
+7. [Creating Tokens (Instruments)](#creating-tokens)
+8. [Minting Tokens](#minting-tokens)
+9. [Querying Balances](#querying-balances-work-in-progress)
+10. [Gotchas and Caveats](#gotchas-and-caveats)
+
+---
 
 ## Overview
 
-This guide shows how to integrate the canton-wallet-demo with CN Quickstart LocalNet using direct JSON Ledger API instead of Canton Wallet SDK.
+This guide documents the complete process of integrating custom DAML contracts with Canton Network's CN Quickstart LocalNet. It covers:
 
-**Problem Solved**: Canton Wallet SDK only supports token standard operations, not custom DAML contracts. This integration uses JSON Ledger API v2 directly.
+- Custom token contracts with admin-controlled minting
+- Multi-participant Canton topology
+- JSON Ledger API v2 integration
+- Common pitfalls and solutions
 
-## Files Created
+---
 
-1. `src/services/cnQuickstartLedgerService.js` - Direct JSON Ledger API client
-2. `server/routes/cnQuickstartRoutes.js` - Backend API routes
+## Prerequisites
 
-## Integration Steps
+### Software Versions
 
-### Step 1: Update Backend Server
+```yaml
+DAML SDK: 3.3.0-snapshot.20250502.13767.0.v2fc6c7e2
+Canton: CN Quickstart LocalNet (running in Docker)
+Node.js: 18+ (for backend server)
+```
 
-Edit `server/index.js` to register the new routes:
+### Required Services
+
+1. **Canton LocalNet** running via Docker:
+   - app-provider participant: Port 3975 (JSON API)
+   - app-user participant: Port 2975 (JSON API)
+   - Backend API: Port 8080
+
+2. **Development Environment**:
+   - DAML compiler (`daml`)
+   - Docker with Canton container running
+   - Backend server (Node.js/Fastify)
+
+---
+
+## DAML Contract Design
+
+### Critical Design Decision: Nonconsuming Choices
+
+**GOTCHA #1**: DAML choices are **consuming by default** - they archive the contract after execution.
+
+#### Problem
+
+If you write an Issue choice like this:
+
+```daml
+choice Issue : ContractId Holding
+  with
+    owner  : Party
+    amount : Decimal
+  controller admin
+  do
+    create Holding with ...
+```
+
+The Instrument contract will be **archived after the first mint**, preventing subsequent mints.
+
+#### Solution
+
+Use the `nonconsuming` keyword:
+
+```daml
+nonconsuming choice Issue : ContractId Holding
+  with
+    owner  : Party
+    amount : Decimal
+  controller admin
+  do
+    create Holding with ...
+```
+
+### Complete DAML Contract
+
+**File**: `daml/minimal-token/daml/MinimalToken.daml`
+
+```daml
+module MinimalToken where
+
+template Instrument
+  with
+    admin    : Party
+    name     : Text
+    symbol   : Text
+    decimals : Int
+  where
+    signatory admin
+
+    -- Admin mints a Holding directly to an owner (nonconsuming to allow multiple mints)
+    nonconsuming choice Issue : ContractId Holding
+      with
+        owner  : Party
+        amount : Decimal
+      controller admin
+      do
+        assertMsg "amount must be positive" (amount > 0.0)
+        create Holding with admin, owner, instrument = self, amount
+
+template Holding
+  with
+    admin      : Party
+    owner      : Party
+    instrument : ContractId Instrument
+    amount     : Decimal
+  where
+    signatory admin
+    observer owner
+
+    -- Transfer part or all of the holding
+    choice Transfer : (ContractId Holding, Optional (ContractId Holding))
+      with
+        recipient      : Party
+        transferAmount : Decimal
+      controller owner
+      do
+        assertMsg "transferAmount must be positive" (transferAmount > 0.0)
+        assertMsg "insufficient balance" (transferAmount <= amount)
+        archive self
+        newCid <- create Holding with
+          admin
+          owner = recipient
+          instrument
+          amount = transferAmount
+        if transferAmount < amount then do
+          changeCid <- create Holding with
+            admin
+            owner = owner
+            instrument
+            amount = amount - transferAmount
+          return (newCid, Some changeCid)
+        else
+          return (newCid, None)
+```
+
+### Key Design Points
+
+1. **Admin as Signatory**: Admin signs all Holdings, enabling minting without owner authorization
+2. **Owner as Observer**: Owner can see their Holdings but doesn't sign them
+3. **Nonconsuming Issue**: Instrument persists after minting, allowing reuse
+4. **Controller = Admin**: Only admin can execute the Issue choice
+
+---
+
+## Building and Uploading DARs
+
+### 1. Project Structure
+
+```
+daml/minimal-token/
+├── daml.yaml
+└── daml/
+    └── MinimalToken.daml
+```
+
+### 2. Configure daml.yaml
+
+**File**: `daml/minimal-token/daml.yaml`
+
+```yaml
+sdk-version: 3.3.0-snapshot.20250502.13767.0.v2fc6c7e2
+name: minimal-token-admin
+version: 1.1.0  # Increment when making changes
+source: daml
+build-options:
+  - --target=2.1
+dependencies:
+  - daml-prim
+  - daml-stdlib
+```
+
+**GOTCHA #2**: Version conflicts - Canton rejects uploading a different DAR with the same name/version.
+
+**Solution**: Increment the version number whenever you change the contract.
+
+### 3. Build the DAR
+
+```bash
+cd /Users/e/code/architecture/canton/canton-wallet-demo/daml/minimal-token
+daml build --output=.daml/dist/minimal-token-admin-1.1.0.dar
+```
+
+### 4. Get Package ID
+
+```bash
+daml damlc inspect-dar .daml/dist/minimal-token-admin-1.1.0.dar
+```
+
+Look for the main package line (example output):
+
+```
+minimal-token-admin-1.1.0-fd55eb07f6c8596423bd1765bc749c69ef4eabe86cf6f39787f13be214e717ae
+"fd55eb07f6c8596423bd1765bc749c69ef4eabe86cf6f39787f13be214e717ae"
+```
+
+The hash `fd55eb07...` is your **Package ID**.
+
+### 5. Upload to BOTH Participants
+
+**GOTCHA #3**: Must upload to ALL participants that will interact with the contracts.
+
+Generate JWT for upload:
+
+```bash
+node -e "
+import('crypto').then(({ createHmac }) => {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    sub: 'ledger-api-user',
+    aud: 'https://canton.network.global',
+    actAs: ['app_provider_quickstart-e-1::1220a57d93198bc2f795cf3420debe4dc9ec849e4f393158c73753443f86848fa5ad'],
+    exp: now + 3600,
+    iat: now
+  };
+
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = createHmac('sha256', 'unsafe').update(\`\${header}.\${payloadB64}\`).digest('base64url');
+
+  console.log(\`\${header}.\${payloadB64}.\${signature}\`);
+});
+"
+```
+
+Upload to **app-provider** (port 3975):
+
+```bash
+curl -X POST http://localhost:3975/v2/packages \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@.daml/dist/minimal-token-admin-1.1.0.dar"
+```
+
+Upload to **app-user** (port 2975):
+
+```bash
+curl -X POST http://localhost:2975/v2/packages \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@.daml/dist/minimal-token-admin-1.1.0.dar"
+```
+
+Both should return `{}` on success.
+
+### 6. Update Backend Service
+
+Update the package ID in your backend service:
+
+**File**: `src/services/cnQuickstartLedgerService.js`
 
 ```javascript
-import cnQuickstartRoutes from './routes/cnQuickstartRoutes.js'
-
-// ... existing imports ...
-
-// After existing route registrations:
-await cnQuickstartRoutes(app)
+this.minimalTokenPackageId = 'fd55eb07f6c8596423bd1765bc749c69ef4eabe86cf6f39787f13be214e717ae';
 ```
 
-### Step 2: Set Environment Variables
+---
 
-Edit `/Users/e/code/architecture/canton/canton-wallet-demo/.env`:
+## Canton Multi-Participant Architecture
 
-```bash
-# CN Quickstart LocalNet Configuration
-VITE_CANTON_NETWORK=localnet
-VITE_API_URL=http://localhost:8899
+### Participant Overview
 
-# CN Quickstart endpoints (App Provider)
-VITE_JSON_API_URL=http://localhost:3975
-VITE_CN_BACKEND_URL=http://localhost:8080
+Canton LocalNet runs with 2 participants:
 
-# Optional: Set App Provider party directly if known
-# APP_PROVIDER_PARTY=quickstart-e-1::1220abc...
+| Participant | Port | Hosts Parties |
+|-------------|------|---------------|
+| app-provider | 3975 | app_provider_quickstart-e-1::1220a57d... |
+| app-user | 2975 | External wallet parties (12xxx::12xxx...) |
 
-# Backend port
-PORT=8899
+**GOTCHA #4**: Contracts are only visible to participants where stakeholders reside.
+
+### Contract Visibility
+
+- **Instrument contracts**: Only on app-provider (admin is sole signatory)
+- **Holding contracts**: On BOTH participants (admin + owner are stakeholders)
+  - Admin (signatory) → app-provider
+  - Owner (observer) → app-user
+
+### Party ID Format
+
+```
+{party_hint}::{participant_id}
 ```
 
-### Step 3: Install Dependencies (if needed)
+Examples:
 
-The service uses Node.js built-in `crypto` module, so no new dependencies needed.
+- Admin: `app_provider_quickstart-e-1::1220a57d...`
+- Wallet: `12208::12208cfd67ce...`
 
-```bash
-cd /Users/e/code/architecture/canton/canton-wallet-demo
-npm install
-```
+The prefix indicates which participant hosts the party.
 
-### Step 4: Start Services
+---
 
-**Terminal 1 - CN Quickstart LocalNet:**
-```bash
-cd /Users/e/code/sbc/canton/cn-quickstart/quickstart
-make start
-```
+## JWT Authentication
 
-Wait for all services to be healthy (check `make status`).
+### JWT Structure
 
-**Terminal 2 - Canton Wallet Demo Backend:**
-```bash
-cd /Users/e/code/architecture/canton/canton-wallet-demo
-npm run server:start
-```
-
-**Terminal 3 - Canton Wallet Demo Frontend:**
-```bash
-cd /Users/e/code/architecture/canton/canton-wallet-demo
-npm run dev
-```
-
-## API Usage
-
-### 1. Initialize Connection
-
-```bash
-curl -X POST http://localhost:8899/api/cn/init \
-  -H "Content-Type: application/json"
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "appProviderParty": "quickstart-e-1::1220abc...",
-  "jsonApiUrl": "http://localhost:3975",
-  "message": "Connected to CN Quickstart LocalNet"
-}
-```
-
-### 2. Create Custom Token
-
-```bash
-curl -X POST http://localhost:8899/api/cn/tokens/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Demo Token",
-    "symbol": "DEMO",
-    "decimals": 18
-  }'
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "contractId": "00abc123...",
-  "admin": "quickstart-e-1::1220abc...",
-  "name": "Demo Token",
-  "symbol": "DEMO",
-  "decimals": 18,
-  "transactionId": "1220xyz...",
-  "createdAt": "2025-09-30T..."
-}
-```
-
-### 3. Create External Wallet
-
-Use the existing Canton Wallet SDK route (this works fine):
-
-```bash
-curl -X POST http://localhost:8899/api/daml/wallets \
-  -H "Content-Type: application/json" \
-  -d '{
-    "partyHint": "alice"
-  }'
-```
-
-**Response:**
-```json
-{
-  "partyId": "alice::1220def...",
-  "publicKey": "...",
-  "privateKey": "...",
-  "fingerprint": "1220def...",
-  "partyHint": "alice",
-  "createdAt": "2025-09-30T..."
-}
-```
-
-### 4. Mint Tokens to External Wallet
-
-```bash
-curl -X POST http://localhost:8899/api/cn/tokens/mint \
-  -H "Content-Type: application/json" \
-  -d '{
-    "contractId": "00abc123...",
-    "owner": "alice::1220def...",
-    "amount": "1000.0"
-  }'
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "holdingId": "00ghi789...",
-  "instrumentId": "00abc123...",
-  "owner": "alice::1220def...",
-  "amount": 1000.0,
-  "transactionId": "1220xyz...",
-  "createdAt": "2025-09-30T..."
-}
-```
-
-### 5. Query Balance
-
-```bash
-curl http://localhost:8899/api/cn/balance/alice::1220def...
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "holdings": [{
-    "contractId": "00ghi789...",
-    "owner": "alice::1220def...",
-    "instrument": "00abc123...",
-    "amount": 1000.0
-  }],
-  "totalBalance": 1000.0,
-  "holdingCount": 1
-}
-```
-
-### 6. Check Connection Status
-
-```bash
-curl http://localhost:8899/api/cn/status
-```
-
-**Response:**
-```json
-{
-  "connected": true,
-  "appProviderParty": "quickstart-e-1::1220abc...",
-  "jsonApiUrl": "http://localhost:3975",
-  "packageId": "d8325445c38031336b59afafaf5f01c83494e77884eab47baf3a6436e4be15f6"
-}
-```
-
-## Frontend Integration
-
-Update the frontend to use the new endpoints:
+Canton uses HMAC-SHA256 JWTs with the shared secret `"unsafe"` for LocalNet.
 
 ```javascript
-// src/api/cnQuickstart.js
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8899';
-
-export async function initCNQuickstart() {
-  const response = await fetch(`${API_BASE}/api/cn/init`, {
-    method: 'POST'
-  });
-  return await response.json();
+{
+  "sub": "ledger-api-user",
+  "aud": "https://canton.network.global",
+  "actAs": ["party-id-1", "party-id-2"],  // Parties to sign as
+  "readAs": ["party-id-3"],               // Parties to read as (observer access)
+  "exp": 1759430000,
+  "iat": 1759426400
 }
+```
 
-export async function createToken({ name, symbol, decimals }) {
-  const response = await fetch(`${API_BASE}/api/cn/tokens/create`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, symbol, decimals })
-  });
-  return await response.json();
-}
+### Key Fields
 
-export async function mintTokens({ contractId, owner, amount }) {
-  const response = await fetch(`${API_BASE}/api/cn/tokens/mint`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contractId, owner, amount })
-  });
-  return await response.json();
-}
+- **actAs**: Parties you're authorized to sign transactions for (signatories)
+- **readAs**: Parties you can read contracts for (observers)
+- **sub**: User ID (use `"ledger-api-user"`)
+- **aud**: Always `"https://canton.network.global"` for Canton
 
-export async function queryBalance(owner, instrumentId = null) {
-  const url = new URL(`${API_BASE}/api/cn/balance/${encodeURIComponent(owner)}`);
-  if (instrumentId) {
-    url.searchParams.append('instrumentId', instrumentId);
+### Generating JWTs
+
+```javascript
+import { createHmac } from 'crypto';
+
+function generateJWT(actAsParties, readAsParties = null) {
+  const now = Math.floor(Date.now() / 1000);
+  const actAsArray = Array.isArray(actAsParties) ? actAsParties : [actAsParties];
+
+  const payload = {
+    sub: "ledger-api-user",
+    aud: "https://canton.network.global",
+    actAs: actAsArray,
+    exp: now + 3600,
+    iat: now
+  };
+
+  if (readAsParties) {
+    payload.readAs = Array.isArray(readAsParties) ? readAsParties : [readAsParties];
   }
-  const response = await fetch(url);
-  return await response.json();
+
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString('base64url');
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = createHmac('sha256', 'unsafe')
+    .update(`${header}.${payloadB64}`)
+    .digest('base64url');
+
+  return `${header}.${payloadB64}.${signature}`;
 }
 ```
 
-## Troubleshooting
+---
 
-### Issue: "Could not determine App Provider party"
+## Creating Tokens
 
-**Solution 1**: Check CN Quickstart is running
-```bash
-cd /Users/e/code/sbc/canton/cn-quickstart/quickstart
-make status
+### API Endpoint
+
+```
+POST http://localhost:3975/v2/commands/submit-and-wait-for-transaction
 ```
 
-**Solution 2**: Set environment variable directly
-```bash
-# Get party from CN Quickstart backend
-curl http://localhost:8080/admin/tenant-registrations
+### Request Format
 
-# Set in .env or export
-export APP_PROVIDER_PARTY="quickstart-e-1::1220abc..."
-```
-
-### Issue: "JSON Ledger API failed: 401"
-
-**Cause**: JWT authentication issue
-
-**Solution**: Check JWT generation in logs. The service uses:
-- Secret: `"unsafe"`
-- Issuer: `"unsafe-auth"`
-- Algorithm: HMAC-SHA256
-
-### Issue: "JSON Ledger API failed: 404"
-
-**Cause**: Wrong JSON API URL
-
-**Solution**: Verify port in service:
-- App Provider: `http://localhost:3975` ✅
-- App User: `http://localhost:2975` (wrong for this use case)
-
-### Issue: "No created event found in response"
-
-**Cause**: Contract creation succeeded but response parsing failed
-
-**Solution**: Check logs for full response. The service expects:
-```json
+```javascript
 {
-  "result": {
-    "events": [{
-      "created": {
-        "contractId": "...",
-        "payload": {...}
+  "commands": {
+    "applicationId": "canton-wallet-demo",
+    "commandId": "create-instrument-TIMESTAMP-RANDOM",
+    "actAs": ["app_provider_quickstart-e-1::1220a57d..."],
+    "commands": [{
+      "CreateCommand": {
+        "templateId": "PACKAGE_ID:MinimalToken:Instrument",
+        "createArguments": {
+          "admin": "app_provider_quickstart-e-1::1220a57d...",
+          "name": "Demo Token",
+          "symbol": "DEMO",
+          "decimals": 18
+        }
       }
     }]
   }
 }
 ```
 
-## Testing Complete Flow
+### Extract Contract ID
 
-```bash
-#!/bin/bash
-# test-flow.sh
+Response structure:
 
-set -e
-
-API="http://localhost:8899"
-
-echo "1. Initialize CN Quickstart connection..."
-INIT=$(curl -s -X POST $API/api/cn/init)
-echo $INIT | jq .
-
-APP_PROVIDER=$(echo $INIT | jq -r .appProviderParty)
-echo "App Provider Party: $APP_PROVIDER"
-
-echo -e "\n2. Create token..."
-TOKEN=$(curl -s -X POST $API/api/cn/tokens/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Test Token",
-    "symbol": "TEST",
-    "decimals": 18
-  }')
-echo $TOKEN | jq .
-
-CONTRACT_ID=$(echo $TOKEN | jq -r .contractId)
-echo "Token Contract ID: $CONTRACT_ID"
-
-echo -e "\n3. Create external wallet..."
-WALLET=$(curl -s -X POST $API/api/daml/wallets \
-  -H "Content-Type: application/json" \
-  -d '{
-    "partyHint": "testuser"
-  }')
-echo $WALLET | jq .
-
-PARTY_ID=$(echo $WALLET | jq -r .partyId)
-echo "External Wallet Party: $PARTY_ID"
-
-echo -e "\n4. Mint tokens to wallet..."
-MINT=$(curl -s -X POST $API/api/cn/tokens/mint \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"contractId\": \"$CONTRACT_ID\",
-    \"owner\": \"$PARTY_ID\",
-    \"amount\": \"1000.0\"
-  }")
-echo $MINT | jq .
-
-HOLDING_ID=$(echo $MINT | jq -r .holdingId)
-echo "Holding Contract ID: $HOLDING_ID"
-
-echo -e "\n5. Query balance..."
-BALANCE=$(curl -s "$API/api/cn/balance/$PARTY_ID")
-echo $BALANCE | jq .
-
-echo -e "\n✅ Complete flow successful!"
+```javascript
+{
+  "transaction": {
+    "events": [{
+      "CreatedEvent": {
+        "contractId": "00d7f408234613...",  // ← This is your Instrument contract ID
+        "templateId": "...",
+        "createArguments": { ... }
+      }
+    }],
+    "updateId": "...",
+    "commandId": "..."
+  }
+}
 ```
-
-Save as `test-flow.sh`, make executable, and run:
-```bash
-chmod +x test-flow.sh
-./test-flow.sh
-```
-
-## Expected Outcomes
-
-### ✅ Working
-
-1. **Token Creation**: Real Instrument contracts on Canton ledger
-2. **Contract ID Extraction**: Gets real `00xxx...` format IDs
-3. **Token Minting**: Creates Holding contracts via Issue choice
-4. **Balance Queries**: Reads active Holding contracts
-5. **External Wallets**: Created via Canton Wallet SDK
-
-### ✅ Complete Workflow
-
-```text
-1. Initialize → Get App Provider party from CN Quickstart
-2. Create Token → Instrument contract with admin=AppProvider
-3. Create Wallet → External party via SDK
-4. Mint Tokens → Exercise Issue choice, create Holding
-5. Query Balance → Read Holding contracts for wallet
-```
-
-## Architecture Diagram
-
-```text
-┌─────────────────────────────────────┐
-│   Canton Wallet Demo Frontend      │
-│   http://localhost:5174             │
-└────────────┬────────────────────────┘
-             │
-             ↓ HTTP REST
-┌─────────────────────────────────────┐
-│   Canton Wallet Demo Backend       │
-│   http://localhost:8899             │
-│   ├─ cnQuickstartRoutes.js          │
-│   └─ cnQuickstartLedgerService.js   │
-└────────────┬────────────────────────┘
-             │
-             ↓ JSON Ledger API v2
-┌─────────────────────────────────────┐
-│   CN Quickstart LocalNet            │
-│   /Users/e/code/sbc/canton/...      │
-│   ├─ JSON API: localhost:3975       │
-│   ├─ Backend: localhost:8080        │
-│   └─ App Provider Party             │
-└─────────────────────────────────────┘
-```
-
-## Key Differences from SDK Approach
-
-| Aspect | Canton Wallet SDK | This Approach |
-|--------|------------------|---------------|
-| Custom DAML | ❌ Not supported | ✅ Fully works |
-| Contract IDs | ❌ Can't extract | ✅ In response |
-| Authentication | Complex | ✅ Simple JWT |
-| Port | Various | ✅ 3975 (clear) |
-| Admin Party | External only | ✅ App Provider |
-| Minting | Blocked | ✅ Working |
-| Queries | Blocked | ✅ Working |
-
-## Next Steps
-
-1. ✅ Integrate routes into server (Step 1)
-2. ✅ Update frontend to call new endpoints
-3. ✅ Test complete flow with test script
-4. ✅ Add UI for token creation and minting
-5. ✅ Deploy to production (with proper auth)
 
 ---
 
-**Success Criteria**: End-to-end token lifecycle working on CN Quickstart LocalNet without Canton Wallet SDK limitations.
+## Minting Tokens
+
+### API Endpoint
+
+```
+POST http://localhost:3975/v2/commands/submit-and-wait-for-transaction
+```
+
+### Request Format
+
+```javascript
+{
+  "commands": {
+    "applicationId": "canton-wallet-demo",
+    "commandId": "mint-tokens-TIMESTAMP-RANDOM",
+    "actAs": ["app_provider_quickstart-e-1::1220a57d..."],  // Admin party
+    "commands": [{
+      "ExerciseCommand": {
+        "templateId": "PACKAGE_ID:MinimalToken:Instrument",
+        "contractId": "INSTRUMENT_CONTRACT_ID",  // From create step
+        "choice": "Issue",
+        "choiceArgument": {
+          "owner": "12208::12208cfd67ce...",  // External wallet party
+          "amount": "1000"  // DAML Decimal as string
+        }
+      }
+    }]
+  }
+}
+```
+
+### Success Response
+
+```javascript
+{
+  "transaction": {
+    "events": [{
+      "CreatedEvent": {
+        "contractId": "0033dd866289...",  // ← Holding contract ID
+        "templateId": "PACKAGE_ID:MinimalToken:Holding",
+        "createArguments": {
+          "admin": "app_provider...",
+          "owner": "12208::12208...",
+          "instrument": "00d7f408...",
+          "amount": "1000"
+        }
+      }
+    }]
+  }
+}
+```
+
+**GOTCHA #5**: The Instrument contract ID must match the current Instrument - it doesn't get archived because we used `nonconsuming`.
+
+---
+
+## Querying Balances (Work in Progress)
+
+### Current Status
+
+⚠️ **OPEN ISSUE**: Active contracts query returns empty results despite contracts existing in Canton logs.
+
+### Attempted Approaches
+
+#### Approach 1: Query as Owner with readAs
+
+```javascript
+// JWT: actAs=[owner], readAs=[owner]
+// Query filtersByParty: owner
+// Result: Empty (403 or empty array)
+```
+
+**Issue**: Owner is observer, not signatory. Canton may not return contracts where party is observer-only.
+
+#### Approach 2: Query as Admin with readAs Owner
+
+```javascript
+// JWT: actAs=[admin], readAs=[owner]
+// Query filtersByParty: admin
+// Result: Empty array (even with wildcardFilter)
+```
+
+**Issue**: `/v2/state/active-contracts` endpoint returns empty despite Canton logs showing Active contracts.
+
+### API Format Attempted
+
+```javascript
+{
+  "filter": {
+    "filtersByParty": {
+      "app_provider_quickstart-e-1::1220a57d...": {
+        "inclusive": [{
+          "templateId": "PACKAGE_ID:MinimalToken:Holding"
+        }]
+      }
+    }
+  },
+  "verbose": true,
+  "activeAtOffset": "0"  // Required field - returns error if missing
+}
+```
+
+### Known Working Verification
+
+Canton logs confirm contracts are Active:
+
+```
+Updated cache... -> Active(Versioned(...,ContractInstance(minimal-token-admin,
+fd55eb07...:MinimalToken:Holding,...
+```
+
+### Next Steps to Try
+
+1. **Alternative endpoint**: Try gRPC Ledger API instead of JSON API
+2. **Different query structure**: Use `cumulative` with `TemplateFilter` format
+3. **Stream-based query**: Check if active-contracts requires streaming
+4. **Direct participant access**: Query participant directly via admin console
+
+---
+
+## Gotchas and Caveats
+
+### 1. Consuming Choices Archive Contracts
+
+**Problem**: Default DAML choices consume (archive) the contract after execution.
+
+**Solution**: Use `nonconsuming` keyword for choices that should be reusable.
+
+### 2. Version Conflicts on DAR Upload
+
+**Problem**: Canton rejects uploading different DARs with same name/version.
+
+**Solution**: Increment version in `daml.yaml` whenever changing contracts.
+
+### 3. Multi-Participant Package Distribution
+
+**Problem**: Contracts fail if package not uploaded to all relevant participants.
+
+**Solution**: Upload DAR to ALL participants that will interact with the contracts.
+
+### 4. Contract Visibility Across Participants
+
+**Problem**: Contracts only visible to participants where stakeholders reside.
+
+**Solution**: Design contracts so all stakeholders' participants have access, or use reassignment to move contracts.
+
+### 5. Instrument Contract Not Found After First Mint
+
+**Problem**: With consuming Issue choice, contract is archived after first use.
+
+**Solution**: Use `nonconsuming choice Issue` to keep Instrument active.
+
+### 6. Observer vs Signatory Access
+
+**Problem**: Observers may not see contracts in ACS queries.
+
+**Solution**: Use `readAs` in JWT and query as a signatory party.
+
+### 7. JSON API v2 Query Format
+
+**Problem**: Multiple incompatible query formats (verbose/activeAtOffset vs event_format).
+
+**Error**: `Either filter/verbose or event_format is required. Please use... but not both.`
+
+**Solution**: Use EITHER:
+
+- Backwards compatible: `filter` + `verbose` + `activeAtOffset` (as string "0")
+- New format: `filter` + `eventFormat` (without verbose/activeAtOffset)
+
+### 8. Empty activeAtOffset Error
+
+**Problem**: `activeAtOffset` requires a value but type varies by API version.
+
+**Tried**:
+
+- `""` (empty string) → `Invalid value... (Long at 'activeAtOffset')`
+- `null` → `Invalid value... (Long at 'activeAtOffset')`
+- `0` (number) → `Invalid value... (Long at 'activeAtOffset')`
+- `"0"` (string) → Currently testing
+
+### 9. Package ID Mismatch
+
+**Problem**: Using wrong package ID from old DAR version.
+
+**Solution**: Always run `daml damlc inspect-dar` after building to get current package ID.
+
+### 10. JWT Secret for LocalNet
+
+**Info**: CN Quickstart LocalNet uses shared secret `"unsafe"` for HMAC-SHA256 JWTs.
+
+**Production**: Will use proper OAuth2/OIDC authentication.
+
+---
+
+## Debugging Tips
+
+### 1. Check Canton Logs
+
+```bash
+docker logs canton 2>&1 | grep "CONTRACT_ID" | tail -20
+```
+
+Look for:
+
+- `Active(...)` - Contract exists
+- `Archived(...)` - Contract was consumed
+- Package IDs in contract instances
+
+### 2. Verify Package Upload
+
+```bash
+docker logs canton 2>&1 | grep "PACKAGE_ID"
+```
+
+Should see upload confirmations on both participants.
+
+### 3. Inspect DAR
+
+```bash
+daml damlc inspect-dar path/to/file.dar
+```
+
+Verify:
+
+- Package ID matches your code
+- Template names are correct
+
+### 4. Test JWT Generation
+
+Use online JWT decoder (jwt.io) to verify:
+
+- Payload structure is correct
+- Signature is valid with secret "unsafe"
+
+### 5. Check Participant Connectivity
+
+```bash
+curl http://localhost:3975/v2/packages
+curl http://localhost:2975/v2/packages
+```
+
+Should return package lists (may need auth).
+
+---
+
+## Success Criteria
+
+- [x] DAR builds successfully
+- [x] DAR uploaded to both participants
+- [x] Instrument contract created (token)
+- [x] Tokens minted successfully (nonconsuming works)
+- [ ] Balance queries return correct holdings (IN PROGRESS)
+
+---
+
+## References
+
+- [Canton Documentation](https://docs.digitalasset.com/build/3.3/)
+- [DAML Language Reference](https://docs.daml.com/daml/reference/)
+- [JSON Ledger API v2](https://docs.digitalasset.com/build/3.3/explanations/json-api/)
+
+---
+
+## Changelog
+
+- **2025-10-03**: Initial documentation created
+  - Documented nonconsuming choice requirement
+  - Documented multi-participant DAR upload
+  - Documented JWT authentication structure
+  - Documented current balance query issues
+
+---
+
+**Status**: Minting works perfectly. Balance queries still in progress.

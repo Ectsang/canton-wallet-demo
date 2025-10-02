@@ -9,23 +9,25 @@ template Instrument
   where
     signatory admin
 
-    -- Admin mints a Holding directly to an owner
-    choice Issue : ContractId Holding
+    -- Admin mints a Holding directly to an owner (nonconsuming to allow multiple mints)
+    nonconsuming choice Issue : ContractId Holding
       with
         owner  : Party
         amount : Decimal
       controller admin
       do
         assertMsg "amount must be positive" (amount > 0.0)
-        create Holding with owner, instrument = self, amount
+        create Holding with admin, owner, instrument = self, amount
 
 template Holding
   with
+    admin      : Party
     owner      : Party
     instrument : ContractId Instrument
     amount     : Decimal
   where
-    signatory owner
+    signatory admin
+    observer owner
 
     -- Transfer part or all of the holding; consumes self and
     -- returns new recipient holding and optional change for sender
@@ -39,11 +41,13 @@ template Holding
         assertMsg "insufficient balance" (transferAmount <= amount)
         archive self
         newCid <- create Holding with
+          admin
           owner = recipient
           instrument
           amount = transferAmount
         if transferAmount < amount then do
           changeCid <- create Holding with
+            admin
             owner = owner
             instrument
             amount = amount - transferAmount

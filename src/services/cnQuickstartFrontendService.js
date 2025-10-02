@@ -18,12 +18,13 @@ class CNQuickstartFrontendService {
   async initialize() {
     try {
       console.log('🔄 Initializing CN Quickstart connection...');
-      
+
       const response = await fetch(`${this.baseUrl}${this.apiPrefix}/init`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-        }
+        },
+        body: JSON.stringify({})
       });
 
       if (!response.ok) {
