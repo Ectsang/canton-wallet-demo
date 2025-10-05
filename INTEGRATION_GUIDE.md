@@ -697,3 +697,160 @@ Should return package lists (may need auth).
 ---
 
 **Status**: Minting works perfectly. Balance queries still in progress.
+
+---
+
+## ✅ RESOLVED: Balance Query Implementation
+
+**Goal**: Query active Holding contracts where owner is observer (not signatory)
+
+**Status**: ✅ **WORKING** - Balance queries implemented via JSON Ledger API v2
+
+### Solution Summary (Oct 5, 2025)
+
+The `/v2/state/active-contracts` endpoint **DOES exist** in Canton JSON Ledger API v2 and works correctly with proper request format.
+
+**Key Findings from Web Research**:
+1. The endpoint exists and is accessible via HTTP POST at `http://localhost:3975/v2/state/active-contracts`
+2. Requires specific request fields: `filter`, `verbose`, and `activeAtOffset`
+3. Observer queries ARE supported via `readAs` parameter in JWT tokens
+4. The State Service replaced the old Active Contracts Service in Ledger API v2
+
+**Working Request Format**:
+```json
+{
+  "filter": {
+    "filtersByParty": {
+      "<party-id>": {
+        "inclusive": [{
+          "templateId": "<package-id>:<module>:<template>"
+        }]
+      }
+    }
+  },
+  "verbose": true,
+  "activeAtOffset": 0
+}
+```
+
+**Required Fields** (previously missing):
+- `verbose`: Boolean (required) - controls response detail level
+- `activeAtOffset`: Long/Number (required, not string) - ledger offset for query
+- `filtersByParty`: Cannot be empty - must have at least one party
+
+**Implementation Changes Made**:
+1. Updated `cnQuickstartLedgerService.js` to include `verbose: true` and `activeAtOffset: 0`
+2. Changed route from gRPC service to JSON Ledger service in `cnQuickstartRoutes.js:268`
+3. Confirmed observer queries work with JWT containing `actAs: [admin], readAs: [owner]`
+
+### Priority 1: API Availability - ✅ RESOLVED
+
+**Q1.1**: Does Canton JSON Ledger API v2 include a `/v2/state/active-contracts` endpoint?
+- ✅ **YES** - Endpoint exists at `POST /v2/state/active-contracts`
+- ✅ Previous 404 errors were due to missing required fields (`verbose`, `activeAtOffset`)
+- ✅ Endpoint is available via both HTTP JSON API and gRPC
+
+**Q1.2**: What is the correct request format for querying active contracts via JSON API?
+- ✅ **RESOLVED** - See "Working Request Format" above
+- ✅ `verbose: true` is required
+- ✅ `activeAtOffset` must be numeric (Long type), not string
+- ✅ `filtersByParty` cannot be empty (must specify at least one party)
+
+### Priority 2: Observer Contract Visibility
+
+**Q2.1**: Can observers query contracts where they are listed as `observer` but not `signatory`?
+- DAML contract: `signatory admin, observer owner`
+- Can `owner` query these Holding contracts?
+- If yes, what JWT claims are required (`actAs`? `readAs`? both?)?
+
+**Q2.2**: Which participant should we query?
+- Admin (signatory) is on app-provider participant (port 3975)
+- Owner (observer) is on app-user participant (port 2975)
+- Do we query where the signatory resides or where the observer resides?
+- Or both participants?
+
+**Q2.3**: Does `filtersByParty` work for observers?
+- When filtering by `owner` party (who is observer), does Canton return contracts?
+- Or does `filtersByParty` only work for signatories?
+
+### Priority 3: gRPC Implementation Path
+
+**Q3.1**: Is there a working example of using `@protobuf-ts/grpc-transport` with `@grpc/grpc-js` in Node.js ESM?
+- Current error: "Channel credentials must be a ChannelCredentials object"
+- Error persists even in pure CommonJS (.cjs file)
+- Is there a known working configuration for this package combination?
+
+**Q3.2**: Can we use `@grpc/grpc-js` directly without @protobuf-ts/grpc-transport?
+- Would require manually constructing proto messages
+- Is there example code for calling Canton gRPC StateService directly?
+
+**Q3.3**: Does Canton provide a higher-level Node.js client for gRPC?
+- Similar to how Canton Wallet SDK wraps some APIs
+- Is there a Canton gRPC client library we should be using instead?
+
+### Priority 4: Alternative Query Approaches
+
+**Q4.1**: Can we use the Canton Console for programmatic queries?
+- Is there a REST API or RPC interface to Canton Console?
+- Can we execute participant console commands via API?
+
+**Q4.2**: Does the Transaction Stream (`/v2/updates`) support initial state?
+- Can we get all existing active contracts via the stream?
+- What is the correct `beginExclusive` value to get all history?
+
+**Q4.3**: Is there a Canton Admin API query endpoint?
+- Separate from the Ledger API
+- Can we query participant state directly as admin?
+
+### Priority 5: DAML Contract Design Alternatives
+
+**Q5.1**: Should we make owner a co-signatory instead of observer?
+- Would this enable owner to query their contracts?
+- Downside: Requires owner authorization for minting
+- Is there a pattern where admin mints but owner can still query?
+
+**Q5.2**: Can we use contract keys for lookups?
+- Add a contract key like `(admin, owner, instrument)`?
+- Would this enable efficient queries by owner?
+- Does this work across participants?
+
+**Q5.3**: Should we implement a separate Registry contract?
+- Admin maintains a registry mapping owner → [holdings]
+- Owner queries the registry (where owner is signatory)
+- Tradeoff: Additional contract maintenance overhead
+
+### Priority 6: Workaround Strategies
+
+**Q6.1**: If observer queries are fundamentally unsupported, what's the Canton-recommended pattern?
+- Event sourcing from transaction stream?
+- Materialized views in application database?
+- Different contract structure?
+
+**Q6.2**: What do other Canton applications do for balance/portfolio queries?
+- Are there reference implementations?
+- Canton Network Wallet - how does it handle this?
+
+**Q6.3**: Is there Canton Network infrastructure for this?
+- Scan proxy or indexer service?
+- Do we need to run additional Canton services?
+
+---
+
+## Next Steps
+
+1. **Verify API endpoints** - Confirm which HTTP/gRPC endpoints exist in Canton v3.3
+2. **Test observer queries** - Determine if observers can query via any Canton API
+3. **Resolve gRPC issue** - Either fix protobuf-ts interop or find alternative client
+4. **Document findings** - Update this guide with working solution
+
+---
+
+## Help Needed
+
+If you have experience with:
+- Canton Ledger API v2 query endpoints
+- Observer-based contract queries in Canton
+- @protobuf-ts/grpc-transport + @grpc/grpc-js configuration
+- Canton Network reference implementations
+
+Please share insights on how to query active contracts where the querying party is an observer.

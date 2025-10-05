@@ -1,6 +1,6 @@
 sdk-version: 3.3.0-snapshot.20250502.13767.0.v2fc6c7e2
-name: minimal-token-admin
-version: 1.1.0
+name: minimal-token-autoaccept
+version: 2.0.0
 source: daml
 build-options:
   - --target=2.1

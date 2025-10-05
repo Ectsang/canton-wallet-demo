@@ -6,15 +6,27 @@
  */
 
 import CNQuickstartLedgerService from '../../src/services/cnQuickstartLedgerService.js';
+import { createRequire } from 'module';
 
-// Singleton service instance
+const require = createRequire(import.meta.url);
+const CNQuickstartGrpcBalanceService = require('../../src/services/cnQuickstartGrpcBalanceService.cjs');
+
+// Singleton service instances
 let ledgerService = null;
+let grpcBalanceService = null;
 
 function getLedgerService() {
   if (!ledgerService) {
     ledgerService = new CNQuickstartLedgerService();
   }
   return ledgerService;
+}
+
+function getGrpcBalanceService() {
+  if (!grpcBalanceService) {
+    grpcBalanceService = new CNQuickstartGrpcBalanceService();
+  }
+  return grpcBalanceService;
 }
 
 export default async function cnQuickstartRoutes(app) {
@@ -151,7 +163,7 @@ export default async function cnQuickstartRoutes(app) {
           type: 'object',
           properties: {
             success: { type: 'boolean' },
-            holdingId: { type: 'string' },
+            proposalId: { type: 'string' },
             instrumentId: { type: 'string' },
             owner: { type: 'string' },
             amount: { type: 'number' },
@@ -186,8 +198,8 @@ export default async function cnQuickstartRoutes(app) {
         amount
       });
 
-      app.log.info('Tokens minted successfully', {
-        holdingId: result.holdingId,
+      app.log.info('HoldingProposal created successfully (Issue)', {
+        proposalId: result.proposalId,
         owner: result.owner,
         amount: result.amount
       });
@@ -200,6 +212,77 @@ export default async function cnQuickstartRoutes(app) {
       return {
         success: false,
         error: 'MintingFailed',
+        message: error.message
+      };
+    }
+  });
+
+  // POST /api/cn/proposals/accept - Accept a HoldingProposal to create Holding
+  app.post('/api/cn/proposals/accept', {
+    schema: {
+      description: 'Accept a HoldingProposal by exercising the Accept choice (owner only)',
+      tags: ['cn-quickstart'],
+      body: {
+        type: 'object',
+        properties: {
+          proposalId: { type: 'string', description: 'HoldingProposal contract ID to accept' },
+          owner: { type: 'string', description: 'Owner party ID (must be authorized to accept)' }
+        },
+        required: ['proposalId', 'owner']
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            holdingId: { type: 'string' },
+            proposalId: { type: 'string' },
+            owner: { type: 'string' },
+            amount: { type: 'number' },
+            instrumentId: { type: 'string' },
+            transactionId: { type: 'string' },
+            createdAt: { type: 'string' }
+          }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    try {
+      const { proposalId, owner } = req.body;
+
+      app.log.info('Accepting holding proposal via CN Quickstart', {
+        proposalId,
+        owner
+      });
+
+      const service = getLedgerService();
+      const result = await service.acceptProposal({
+        proposalId,
+        owner
+      });
+
+      app.log.info('Holding proposal accepted successfully', {
+        holdingId: result.holdingId,
+        owner: result.owner,
+        amount: result.amount
+      });
+
+      return result;
+
+    } catch (error) {
+      app.log.error('Failed to accept proposal', { error: error.message });
+      reply.code(400);
+      return {
+        success: false,
+        error: 'AcceptProposalFailed',
         message: error.message
       };
     }
@@ -251,7 +334,7 @@ export default async function cnQuickstartRoutes(app) {
       const { owner } = req.params;
       const { instrumentId } = req.query;
 
-      app.log.info('Querying balance via CN Quickstart', { owner, instrumentId });
+      app.log.info('Querying balance via JSON API /v2/state/active-contracts', { owner, instrumentId });
 
       const service = getLedgerService();
       const result = await service.queryHoldings({
@@ -259,7 +342,7 @@ export default async function cnQuickstartRoutes(app) {
         instrumentId
       });
 
-      app.log.info('Balance query successful', {
+      app.log.info('Balance query successful via JSON API', {
         owner,
         totalBalance: result.totalBalance,
         holdingCount: result.holdingCount
@@ -268,11 +351,99 @@ export default async function cnQuickstartRoutes(app) {
       return result;
 
     } catch (error) {
-      app.log.error('Failed to query balance', { error: error.message });
+      app.log.error('Failed to query balance via JSON API', { error: error.message });
       reply.code(400);
       return {
         success: false,
         error: 'BalanceQueryFailed',
+        message: error.message
+      };
+    }
+  });
+
+  // POST /api/cn/wallets/create - Create external wallet using Canton Admin API
+  app.post('/api/cn/wallets/create', {
+    schema: {
+      description: 'Create an external wallet by allocating party on app-user participant',
+      tags: ['cn-quickstart'],
+      body: {
+        type: 'object',
+        properties: {
+          partyHint: { type: 'string', description: 'Party hint for the wallet' }
+        },
+        required: ['partyHint']
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            partyHint: { type: 'string' },
+            partyId: { type: 'string' },
+            publicKey: { type: 'string' },
+            fingerprint: { type: 'string' },
+            createdAt: { type: 'string' }
+          }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    try {
+      const { partyHint } = req.body;
+
+      app.log.info('Creating external wallet via Canton Admin API', { partyHint });
+
+      // Use grpcurl to call Canton Admin API to allocate party on app-user participant
+      const { promisify } = require('util');
+      const exec = promisify(require('child_process').exec);
+
+      // Call AllocateParty on app-user participant Admin API (port 2902)
+      const grpcCommand = `grpcurl -plaintext -d '{"party_id_hint":"${partyHint}","display_name":"External Wallet ${partyHint}"}' localhost:2902 com.digitalasset.canton.admin.participant.v30.PartyNameManagementService/AllocateParty`;
+
+      app.log.info('Executing grpcurl command', { grpcCommand });
+
+      const { stdout, stderr } = await exec(grpcCommand, { timeout: 30000 });
+
+      app.log.info('grpcurl output', { stdout, stderr });
+
+      // Parse response JSON
+      const response = JSON.parse(stdout);
+      const partyDetails = response.party_details;
+
+      if (!partyDetails || !partyDetails.party) {
+        throw new Error(`Failed to allocate party: ${stdout}`);
+      }
+
+      const partyId = partyDetails.party;
+      const fingerprint = partyId.split('::')[1] || 'unknown';
+
+      const walletInfo = {
+        success: true,
+        partyHint: partyHint,
+        partyId: partyId,
+        publicKey: 'managed-by-canton', // Canton manages keys for local parties
+        fingerprint: fingerprint,
+        createdAt: new Date().toISOString()
+      };
+
+      app.log.info('External wallet created successfully', { partyId });
+
+      return walletInfo;
+
+    } catch (error) {
+      app.log.error('Failed to create external wallet', { error: error.message });
+      reply.code(400);
+      return {
+        success: false,
+        error: 'WalletCreationFailed',
         message: error.message
       };
     }

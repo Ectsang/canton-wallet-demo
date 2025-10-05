@@ -2,11 +2,17 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import swagger from '@fastify/swagger'
 import swaggerUI from '@fastify/swagger-ui'
+import fastifyStatic from '@fastify/static'
 import dotenv from 'dotenv'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
 import initRoutes from './routes/init.js'
 import damlRoutes from './routes/daml.js'
 import cnQuickstartRoutes from './routes/cnQuickstartRoutes.js'
 import sdkManager from './sdkManager.js'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 dotenv.config({ path: '.env.server' })
 
@@ -42,6 +48,12 @@ await app.register(swagger, {
   }
 })
 await app.register(swaggerUI, { routePrefix: '/docs', staticCSP: true })
+
+// Serve static files from public directory
+await app.register(fastifyStatic, {
+  root: join(__dirname, '..', 'public'),
+  prefix: '/static/'
+})
 
 // Expose logger to SDK manager
 sdkManager.setLogger(app.log)

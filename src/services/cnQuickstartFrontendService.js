@@ -66,13 +66,13 @@ class CNQuickstartFrontendService {
   }
 
   /**
-   * Create external wallet using existing DAML route
+   * Create external wallet using CN Quickstart wallet endpoint
    */
   async createExternalWallet(partyHint = 'demo-wallet') {
     try {
-      console.log('🔄 Creating external wallet...', { partyHint });
+      console.log('🔄 Creating external wallet (CN Quickstart)...', { partyHint });
 
-      const response = await fetch(`${this.baseUrl}${this.damlApiPrefix}/wallets`, {
+      const response = await fetch(`${this.baseUrl}${this.apiPrefix}/wallets/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -86,9 +86,9 @@ class CNQuickstartFrontendService {
       }
 
       const walletInfo = await response.json();
-      console.log('✅ External wallet created:', {
+      console.log('✅ External wallet created (CN Quickstart):', {
         partyId: walletInfo.partyId,
-        fingerprint: walletInfo.fingerprint
+        partyHint: walletInfo.partyHint
       });
 
       return walletInfo;

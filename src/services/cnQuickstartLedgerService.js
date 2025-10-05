@@ -20,9 +20,8 @@ class CNQuickstartLedgerService {
     this.ledgerId = this.participantId;
 
     // MinimalToken package ID from DAR manifest
-    // Using minimal-token-admin v1.1.0 (admin-as-signatory with nonconsuming Issue)
-    // This allows admin to mint tokens without owner authorization, and reuse Instrument for multiple mints
-    this.minimalTokenPackageId = 'fd55eb07f6c8596423bd1765bc749c69ef4eabe86cf6f39787f13be214e717ae';
+    // Using minimal-token-autoaccept v2.0.0 package with auto-accept pattern (IssueAndAccept choice)
+    this.minimalTokenPackageId = 'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de';
 
     // App Provider party from LocalNet (PARTY_HINT=quickstart-e-1)
     // This is the party with admin rights on App Provider participant
@@ -283,7 +282,7 @@ class CNQuickstartLedgerService {
   }
 
   /**
-   * Mint tokens by exercising Issue choice
+   * Mint tokens by exercising IssueAndAccept choice (auto-accept pattern)
    *
    * @param {string} contractId - Instrument contract ID (from createInstrument)
    * @param {string} owner - External wallet party ID
@@ -293,7 +292,7 @@ class CNQuickstartLedgerService {
     try {
       await this.initialize();
 
-      console.log('🔄 Minting tokens via JSON Ledger API v2...', {
+      console.log('🔄 Minting tokens via Issue choice (cross-participant) via JSON Ledger API v2...', {
         contractId,
         owner,
         amount,
@@ -303,16 +302,15 @@ class CNQuickstartLedgerService {
       const templateId = `${this.minimalTokenPackageId}:MinimalToken:Instrument`;
       const commandId = `mint-tokens-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
-      // Generate JWT for admin party only
-      // Note: This will likely fail due to DAML authorization (owner is signatory)
-      const token = this.generateJWT(this.appProviderParty);
+      // Generate JWT for admin only (Issue choice only requires admin authorization)
+      const token = this.generateJWT([this.appProviderParty]);
 
       // JSON Ledger API v2 format
       const request = {
         commands: {
           applicationId: "canton-wallet-demo",
           commandId: commandId,
-          actAs: [this.appProviderParty],  // Only admin - will fail if owner signature required
+          actAs: [this.appProviderParty],  // Only admin - Issue choice has controller admin
           commands: [{
             ExerciseCommand: {
               templateId: templateId,
@@ -354,20 +352,20 @@ class CNQuickstartLedgerService {
       console.log('🔍 Full mint result structure:', JSON.stringify(result, null, 2));
       console.log('🔍 Mint result keys:', Object.keys(result || {}));
 
-      // Extract Holding contract ID from created events
+      // Extract Holding contract ID from created events (auto-accepted)
       // Canton JSON Ledger API v2 returns events under 'transaction' key
       if (result?.transaction?.events && result.transaction.events.length > 0) {
         console.log(`🔍 Found ${result.transaction.events.length} events in mint response`);
         const createdEvent = result.transaction.events.find(e => e.CreatedEvent);
 
         if (createdEvent && createdEvent.CreatedEvent) {
-          const holdingId = createdEvent.CreatedEvent.contractId;
-          console.log('✅ Tokens minted successfully!');
-          console.log('✅ Holding contract ID:', holdingId);
+          const proposalId = createdEvent.CreatedEvent.contractId;
+          console.log('✅ HoldingProposal created successfully via Issue choice!');
+          console.log('✅ Proposal contract ID:', proposalId);
 
           return {
             success: true,
-            holdingId: holdingId,
+            proposalId: proposalId,  // HoldingProposal ID (needs Accept)
             instrumentId: contractId,
             owner: owner,
             amount: parseFloat(amount),
@@ -390,109 +388,197 @@ class CNQuickstartLedgerService {
   }
 
   /**
-   * Query active contracts (for balance checks)
+   * Accept a HoldingProposal to create a Holding contract
+   * Owner exercises the Accept choice on HoldingProposal
    *
-   * @param {string} owner - Party ID to query holdings for
+   * @param {string} proposalId - HoldingProposal contract ID to accept
+   * @param {string} owner - Party ID of the owner (must be authorized to accept)
+   */
+  async acceptProposal({ proposalId, owner }) {
+    try {
+      await this.initialize();
+
+      console.log('🔄 Accepting holding proposal via JSON Ledger API v2...', {
+        proposalId,
+        owner
+      });
+
+      const proposalTemplateId = `${this.minimalTokenPackageId}:MinimalToken:HoldingProposal`;
+      const commandId = `accept-proposal-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+      // For cross-participant Accept, owner exercises on app-provider where HoldingProposal was created
+      // HoldingProposal has signatory admin, observer owner - exists on app-provider participant
+      const token = this.generateJWT([owner], [this.appProviderParty]);
+
+      // Use app-provider participant (where HoldingProposal was created and is stored)
+      const apiUrl = 'http://localhost:3975';  // app-provider JSON API
+
+      const exerciseCommand = {
+        templateId: proposalTemplateId,
+        contractId: proposalId,
+        choice: 'Accept',
+        choiceArgument: {}  // Accept choice takes no arguments (JSON API uses choiceArgument not argument)
+      };
+
+      const requestBody = {
+        commands: {
+          applicationId: "canton-wallet-demo",
+          commandId: commandId,
+          actAs: [owner],
+          readAs: [this.appProviderParty],  // Admin readAs to see HoldingProposal
+          commands: [{
+            ExerciseCommand: exerciseCommand
+          }]
+        }
+      };
+
+      console.log('📋 Exercise Accept command:', JSON.stringify(requestBody, null, 2));
+
+      const response = await this.fetchWithTimeout(
+        `${apiUrl}/v2/commands/submit-and-wait-for-transaction`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(requestBody)
+        },
+        30000  // 30 second timeout for command submission
+      );
+
+      // Log raw response for debugging
+      const responseText = await response.text();
+      console.log('📥 Raw Accept response:', responseText);
+      console.log('📥 Response status:', response.status);
+
+      const result = JSON.parse(responseText);
+
+      console.log('📥 Accept command response:', JSON.stringify(result, null, 2));
+
+      // Extract Holding contract ID from created events
+      if (result?.transaction?.events && result.transaction.events.length > 0) {
+        console.log(`🔍 Found ${result.transaction.events.length} events in accept response`);
+        const createdEvent = result.transaction.events.find(e => e.CreatedEvent);
+
+        if (createdEvent && createdEvent.CreatedEvent) {
+          const holdingId = createdEvent.CreatedEvent.contractId;
+          const createArg = createdEvent.CreatedEvent.createArgument || {};
+
+          console.log('✅ Holding created successfully from accepted proposal!');
+          console.log('✅ Holding contract ID:', holdingId);
+          console.log('✅ Holding payload:', JSON.stringify(createArg, null, 2));
+
+          return {
+            success: true,
+            holdingId: holdingId,
+            proposalId: proposalId,
+            owner: createArg.owner || owner,
+            amount: parseFloat(createArg.amount || 0),
+            instrumentId: createArg.instrument || null,
+            transactionId: result.transaction.updateId || result.transaction.commandId,
+            createdAt: new Date().toISOString()
+          };
+        }
+      }
+
+      throw new Error('No created Holding contract found in response');
+
+    } catch (error) {
+      console.error('❌ Failed to accept proposal:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Query holdings using /v2/state/active-contracts endpoint
+   * Observer access: admin is actAs, owner is readAs
+   *
+   * @param {string} owner - Party ID to query holdings for (observer)
    * @param {string} [instrumentId] - Optional instrument contract ID filter
    */
   async queryHoldings({ owner, instrumentId }) {
     try {
       await this.initialize();
 
-      console.log('🔍 Querying holdings via JSON Ledger API v2...', { owner, instrumentId });
+      console.log('🔍 Querying active holdings via JSON API /v2/state/active-contracts...', { owner, instrumentId });
 
       const holdingTemplateId = `${this.minimalTokenPackageId}:MinimalToken:Holding`;
 
-      // Query app-provider participant as admin (who is signatory)
-      // Use readAs to allow seeing contracts where owner is observer
-      const apiUrl = this.jsonApiUrl; // Always query app-provider
+      // Query app-user participant (where external wallet owner is registered)
+      // Owner is observer on Holding contracts, can query directly
+      const apiUrl = 'http://localhost:2975';  // app-user JSON API (not app-provider)
 
-      console.log(`🔍 Querying app-provider participant at ${apiUrl} (admin with readAs:${owner})`);
+      // Generate JWT: actAs owner (owner can see contracts where they're observer)
+      const token = this.generateJWT(owner);
 
-      // Generate JWT as admin party with readAs for owner
-      // This allows us to see Holding contracts where admin is signatory and owner is observer
-      const token = this.generateJWT(this.appProviderParty, owner);
-
-      // JSON Ledger API v2 active contracts query format
-      // Query by admin party (signatory) to find all Holdings
       const requestBody = {
         filter: {
           filtersByParty: {
-            [this.appProviderParty]: {
+            [owner]: {  // Query for contracts visible to owner (as observer)
               inclusive: [{
                 templateId: holdingTemplateId
               }]
             }
           }
         },
-        verbose: true,
-        activeAtOffset: "0"
+        verbose: true,  // Required field
+        activeAtOffset: 0  // Query from beginning of ledger (0 = participant's begin offset)
       };
 
-      console.log('📋 Query request body:', JSON.stringify(requestBody, null, 2));
+      console.log('📋 Active contracts request:', JSON.stringify(requestBody, null, 2));
 
-      const response = await fetch(`${apiUrl}/v2/state/active-contracts`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      const response = await this.fetchWithTimeout(
+        `${apiUrl}/v2/state/active-contracts`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
         },
-        body: JSON.stringify(requestBody)
-      });
+        10000
+      );
 
       const responseText = await response.text();
-      console.log('📋 Query response status:', response.status);
-      console.log('📋 Query response body:', responseText);
+      console.log('📋 Active contracts response status:', response.status);
+      console.log('📋 Response (first 1000 chars):', responseText.substring(0, 1000));
 
       if (!response.ok) {
-        throw new Error(`Query failed: ${response.status} - ${responseText}`);
+        throw new Error(`Active contracts query failed: ${response.status} - ${responseText}`);
       }
 
       const result = JSON.parse(responseText);
+      const contracts = result.result || [];
 
-      console.log('🔍 Query result structure:', JSON.stringify(result, null, 2));
+      console.log(`🔍 Found ${contracts.length} active contracts`);
 
-      // Parse holdings from result
-      // Canton v2 API with new format returns activeContracts array
+      // Filter and map to holdings
       const holdings = [];
-      const contracts = result?.activeContracts || result?.contracts || result || [];
+      for (const contract of contracts) {
+        const payload = contract.payload || contract.createArguments;
 
-      console.log('🔍 Found contracts array:', Array.isArray(contracts), 'length:', contracts.length);
-
-      if (Array.isArray(contracts)) {
-        for (const contract of contracts) {
-          console.log('🔍 Processing contract:', JSON.stringify(contract, null, 2));
-
-          // Try different payload locations based on Canton API format
-          const payload = contract.payload ||
-                         contract.createdEvent?.payload ||
-                         contract.createArguments ||
-                         contract.CreateArgument;
-
-          if (payload) {
-            console.log('🔍 Found payload:', JSON.stringify(payload, null, 2));
-
-            // Filter by owner (since we queried as admin, we get all Holdings)
-            if (payload.owner === owner) {
-              // Filter by instrument if specified
-              if (!instrumentId || payload.instrument === instrumentId) {
-                holdings.push({
-                  contractId: contract.contractId || contract.createdEvent?.contractId,
-                  owner: payload.owner,
-                  instrument: payload.instrument,
-                  amount: parseFloat(payload.amount)
-                });
-              }
-            }
-          } else {
-            console.log('⚠️  No payload found in contract');
+        // Filter by owner and optional instrumentId
+        if (payload && payload.owner === owner) {
+          if (!instrumentId || payload.instrument === instrumentId) {
+            holdings.push({
+              contractId: contract.contractId,
+              owner: payload.owner,
+              admin: payload.admin,
+              instrument: payload.instrument,
+              amount: parseFloat(payload.amount)
+            });
           }
         }
       }
 
       console.log(`✅ Found ${holdings.length} holdings for owner ${owner}`);
 
-      // Calculate total balance
       const totalBalance = holdings.reduce((sum, h) => sum + h.amount, 0);
 
       return {

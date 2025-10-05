@@ -3,10 +3,12 @@
 
 set -e
 
-DAR_FILE="$(pwd)/daml/minimal-token/minimal-token.dar"
+# Use the latest built DAR (auto-accept version)
+DAR_FILE="$(pwd)/daml/minimal-token/.daml/dist/minimal-token-autoaccept-2.0.0.dar"
 
 if [ ! -f "$DAR_FILE" ]; then
   echo "❌ DAR file not found: $DAR_FILE"
+  echo "💡 Try building the DAR first: daml build --project-root=daml/minimal-token"
   exit 1
 fi
 

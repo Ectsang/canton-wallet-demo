@@ -10,16 +10,26 @@ template Instrument
     signatory admin
 
     -- Admin mints a Holding directly to an owner (nonconsuming to allow multiple mints)
-    nonconsuming choice Issue : ContractId Holding
+    nonconsuming choice Issue : ContractId HoldingProposal
       with
         owner  : Party
         amount : Decimal
       controller admin
       do
         assertMsg "amount must be positive" (amount > 0.0)
+        create HoldingProposal with admin, owner, instrument = self, amount
+
+    -- Auto-accept: admin directly creates Holding (both admin and owner sign)
+    nonconsuming choice IssueAndAccept : ContractId Holding
+      with
+        owner  : Party
+        amount : Decimal
+      controller admin, owner
+      do
+        assertMsg "amount must be positive" (amount > 0.0)
         create Holding with admin, owner, instrument = self, amount
 
-template Holding
+template HoldingProposal
   with
     admin      : Party
     owner      : Party
@@ -28,6 +38,20 @@ template Holding
   where
     signatory admin
     observer owner
+
+    choice Accept : ContractId Holding
+      controller owner
+      do
+        create Holding with admin, owner, instrument, amount
+
+template Holding
+  with
+    admin      : Party
+    owner      : Party
+    instrument : ContractId Instrument
+    amount     : Decimal
+  where
+    signatory admin, owner  -- Both parties sign for cross-participant visibility
 
     -- Transfer part or all of the holding; consumes self and
     -- returns new recipient holding and optional change for sender

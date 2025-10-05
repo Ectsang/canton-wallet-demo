@@ -12,7 +12,10 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
+
+  // Canton state
+  const [appProviderParty, setAppProviderParty] = useState(null);
+
   // Wallet state
   const [wallet, setWallet] = useState(null);
   const [partyHint, setPartyHint] = useState('quickstart-e-1');
