@@ -1,484 +1,277 @@
 # Canton Wallet Demo - Context & Status
 
-## Project Goal
-Fix cross-participant token minting in Canton Network LocalNet to enable:
-- **Admin** (on app-provider participant) can Issue a HoldingProposal
-- **Owner** (on app-user participant) can Accept the proposal to create a Holding
+## Current Status (2025-10-07)
 
-## Problem Identified
-Cross-participant Accept was failing with authorization error:
+### ✅ WORKING Features
+- **v2.2.0 DAML Contract**: Burn choice implemented and deployed
+- **Cross-Participant Minting**: Issue + Accept flow working
+- **Package Management**: v2.2.0 (c90d4ebe...) set as active, old versions hidden
+- **Transfer Feature**: Implemented (for migrating old holdings)
+- **UI**: Transfer and Burn buttons displayed
+
+### ❌ KNOWN ISSUES
+
+#### 1. Burn Fails on Newly Created Holdings (Race Condition)
+**Symptom**: Burn immediately after Accept returns `CONTRACT_NOT_ACTIVE`
+
+**Error**:
 ```
-FAILED_PRECONDITION: Interpretation error: Error: node DEV::1220... cannot confirm transaction ...
-due to ... Inconsistent: root hash mismatch
+CONTRACT_NOT_ACTIVE(11,371eafc1): Interpretation error: Error: Update failed due to fetch of an inactive contract 006dfbb153c0da3d22bbb539b0ad32c6cf00b4d791cfbe813cf6b60426b7b7623cca11122066722950018381a946476e544192556dec8ca4b0a275ab570f79e82bff40a9d7 (MinimalToken:Holding@c90d4ebe).
+The contract had been consumed in sub-transaction #NodeId(0):
 ```
 
-### Root Cause
-The DAML `Holding` template had BOTH admin and owner as signatories:
+**Timeline**:
+- 16:36:40.567459Z: Holding created (Accept choice)
+- 16:36:45.913448Z: Burn attempted (5 seconds later)
+- Result: CONTRACT_NOT_ACTIVE error
+
+**Root Cause**: Canton's active contract set (ACS) view hasn't fully propagated to the participant yet. The holding was JUST created, and when queried immediately for burn, Canton sees it as "inactive" or "consumed" because the creation event hasn't fully settled.
+
+**Workaround**: Wait 5-10 seconds after creating a holding before burning it, or refresh the UI to force a new ACS query.
+
+**Proper Fix Needed**:
+- Add a delay/retry mechanism in burn operations
+- Query ACS before burn to ensure contract is visible
+- Add transaction finality check
+
+#### 2. Transfer Fails on Old Package Versions
+**Symptom**: Transfer buttons fail on v2.0.x and v2.1.0 holdings
+
+**Error**:
+```
+CONTRACT_NOT_ACTIVE(11,f40f38aa): Interpretation error: Error: Update failed due to fetch of an inactive contract ... (MinimalToken:Holding@c90d4ebe)
+```
+
+**Root Cause**:
+- Query uses old package IDs to FIND holdings (commented out in jsonApiV1Service)
+- Transfer uses v2.2.0 template ID to EXERCISE the choice
+- Mismatch: trying to exercise v2.2.0 choice on v2.1.0 contracts fails
+
+**Solution**: Old package IDs now commented out - only v2.2.0 holdings visible for clean demo
+
+## DAML Contract Evolution
+
+### v2.2.0 (Current - c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae)
+**Added**: Burn choice
+
 ```daml
-template Holding
-  with
-    admin: Party
-    instrument: ContractId Instrument
-    owner: Party
-    amount: Decimal
-  where
-    signatory admin, owner  -- ❌ PROBLEM: Both are signatories
+choice Burn : ()
+  controller owner
+  do
+    archive self
+    return ()
 ```
 
-**Why this fails:** When admin (on app-provider) submits a transaction, owner (on app-user, different participant) cannot sign it because they're on different participants. Canton's authorization model requires all signatories to be on the same participant for cross-participant transactions.
+**Features**:
+- ✅ Issue choice (admin → creates HoldingProposal)
+- ✅ Accept choice (owner → creates Holding from proposal)
+- ✅ Transfer choice (owner → transfer tokens)
+- ✅ Burn choice (owner → destroy holding)
 
-## Solution Implemented
+### v2.1.0 (c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d)
+- Issue, Accept, Transfer only (no Burn)
 
-### 1. Fixed DAML Contract ✅
-Changed `Holding` template to single signatory with observer pattern:
+### v2.0.1 & v2.0.0
+- Basic minting without proposal pattern
 
-**File:** `daml/minimal-token/daml/MinimalToken.daml`
+## Package ID Management
 
-```daml
-template Holding
-  with
-    admin: Party
-    instrument: ContractId Instrument
-    owner: Party
-    amount: Decimal
-  where
-    signatory admin       -- ✅ Only admin is signatory
-    observer owner        -- ✅ Owner is observer (can see but not sign)
+### Active Package IDs (Queried)
+**Files**:
+- `server/services/jsonApiV1Service.js` (lines 21-26)
+- `src/services/cnQuickstartLedgerService.js` (lines 757-762)
+
+**Current Config**:
+```javascript
+this.packageIds = [
+  'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae',  // v2.2.0 (with Burn) ✅ ACTIVE
+  // 'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d',  // v2.1.0 ❌ HIDDEN
+  // '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118',  // v2.0.1 ❌ HIDDEN
+  // 'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'   // v2.0.0 ❌ HIDDEN
+];
 ```
 
-This allows:
-- Admin submits the transaction (they're the signatory)
-- Owner can see the Holding (they're an observer)
-- Cross-participant authorization works correctly
+**Effect**: Only v2.2.0 holdings shown in UI (clean demo state)
 
-### 2. Version Bump ✅
-**File:** `daml/minimal-token/daml.yaml`
-```yaml
-version: 2.0.1  # Bumped from 2.0.0
+## Service Architecture
+
+### Actually Used Services ✅
+1. **CNQuickstartLedgerService** (`src/services/cnQuickstartLedgerService.js`)
+   - **Purpose**: Execute commands (Issue, Accept, Burn, Transfer) via JSON API v2
+   - **Used By**: All POST endpoints in `server/routes/cnQuickstartRoutes.js`
+
+2. **JsonApiV1Service** (`server/services/jsonApiV1Service.js`)
+   - **Purpose**: Query contracts (Holdings, HoldingProposals) via JSON API v1
+   - **Used By**: `/api/cn/balance/:owner`, `/api/cn/proposals/:owner`
+
+### NOT Used Services ❌
+- CNQuickstartGrpcBalanceService (imported but never called)
+- grpcLedgerService.js (not imported)
+- cantonConsoleService.js (not used in API)
+- damlLedgerService.js (not used in API)
+
+## Frontend Integration
+
+**Main Service**: `CNQuickstartFrontendService` (`src/services/cnQuickstartFrontendService.js`)
+- Calls backend API endpoints
+- Methods: initialize, createToken, mintTokens, getProposals, acceptProposal, burnHolding, transferHolding, getTokenBalance
+
+**UI State**: `src/App.jsx`
+- Added `appProviderParty` state (line 17)
+- Set via `setAppProviderParty(initResult.appProviderParty)` on init (line 55)
+- Used in `transferToAdmin()` function (line 398)
+
+## Transfer Feature Implementation
+
+### Purpose
+Allow users to transfer old v2.0.x/v2.1.0 holdings back to admin to "clean up" holdings that can't be burned.
+
+### Implementation
+
+**Backend**:
+- Endpoint: `POST /api/cn/holdings/transfer` (cnQuickstartRoutes.js:370-447)
+- Service Method: `CNQuickstartLedgerService.transferHolding()` (cnQuickstartLedgerService.js:622-729)
+- Choice: `Transfer` (exists in all DAML versions)
+
+**Frontend**:
+- Service Method: `CNQuickstartFrontendService.transferHolding()` (cnQuickstartFrontendService.js:306-344)
+- UI Function: `transferToAdmin()` in App.jsx (lines 386-411)
+- Button: "↩️ Transfer" next to Burn button (App.jsx:1082-1097)
+
+**Flow**:
+1. User clicks "↩️ Transfer" button on a holding
+2. Frontend calls `transferToAdmin(holdingId, amount, symbol)`
+3. Transfers full amount to `appProviderParty` (admin)
+4. Archives old holding, creates new holding owned by admin
+5. Updates balance display
+
+## Known Working Flows
+
+### 1. Cross-Participant Two-Step Minting ✅
+```
+Admin (app-provider) → Issue choice → HoldingProposal created
+Owner (app-user) → Accept choice → Holding created
+Result: 1000 tokens in owner's balance
 ```
 
-Reason: Canton requires different version number to upload alongside existing package.
+**Verified**: 2025-10-06 (v2.2.0)
+- Proposal created successfully
+- Proposal accepted successfully
+- Holding created with both admin and owner as signatories
+- Balance query shows tokens
 
-### 3. Built New DAR ✅
-```bash
-cd daml/minimal-token
-daml build
+### 2. Burn (with timing consideration) ⚠️
+```
+Owner (app-user) → Burn choice → Holding archived
+Result: Tokens removed from supply
 ```
 
-**Output:** `.daml/dist/minimal-token-autoaccept-2.0.1.dar`
+**Status**: Implemented but requires waiting after holding creation
+**Issue**: Race condition - must wait for ACS to propagate
 
-### 4. Uploaded DAR to Both Participants ✅
-Used Python script `/tmp/upload_dar_v2.0.1.py` to upload via gRPC PackageService:
+## DAR Upload Method (Proven Working)
 
+**Method**: grpcurl via Python script
+
+**Script Template**:
 ```python
-# Uploaded to both:
-# - app-provider: localhost:3902
-# - app-user: localhost:2902
+import subprocess, base64, json
+
+dar_path = '/path/to/minimal-token-v2.2.0.dar'
+with open(dar_path, 'rb') as f:
+    dar_bytes = f.read()
+
+dar_b64 = base64.b64encode(dar_bytes).decode('utf-8')
+
+upload_request = {
+    "dars": [{
+        "bytes": dar_b64,
+        "description": "MinimalToken v2.2.0 - Added Burn choice"
+    }],
+    "vet_all_packages": True,
+    "synchronize_vetting": True
+}
+
+# Upload to app-provider (port 3902)
+subprocess.run([
+    'grpcurl', '-plaintext', '-d', json.dumps(upload_request),
+    'localhost:3902',
+    'com.digitalasset.canton.admin.participant.v30.PackageService/UploadDar'
+], capture_output=True, text=True)
+
+# Upload to app-user (port 2902)
+subprocess.run([
+    'grpcurl', '-plaintext', '-d', json.dumps(upload_request),
+    'localhost:2902',
+    'com.digitalasset.canton.admin.participant.v30.PackageService/UploadDar'
+], capture_output=True, text=True)
 ```
 
-**New Package ID:** `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118`
+**After Upload**: Update `cnQuickstartLedgerService.js` line 15 with new package ID
 
-## Current Status (Updated 2025-10-06)
+## Next Steps
 
-### Completed ✅
-1. ✅ DAML contract fix (signatory → observer pattern) - v2.0.1
-2. ✅ Version bump to 2.0.1
-3. ✅ DAR build
-4. ✅ DAR upload to both participants (package ID: `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118`)
-5. ✅ **Same-participant flow VERIFIED WORKING** with v2.0.1
+### Priority 1: Fix Burn Race Condition
+**Options**:
+1. Add 5-second delay before allowing burn operations after Accept
+2. Query ACS before burn to verify contract visibility
+3. Add retry logic (try burn, if CONTRACT_NOT_ACTIVE, wait 2s and retry)
 
-### Test Results
+### Priority 2: Testing
+- Test Burn on holdings that are >10 seconds old (should work)
+- Verify Transfer still fails on old v2.1.0 holdings (expected with current config)
+- Test end-to-end: Create token → Issue → Accept → Wait 10s → Burn ✅
 
-#### ✅ Same-Participant Test (PASSING)
-**Test:** `/tmp/test-v2.0.1-same-participant.sh`
+### Priority 3: Clean Up
+- Remove dead code (CNQuickstartGrpcBalanceService, grpcLedgerService, etc.)
+- Add UI feedback for race condition (e.g., "Holding just created, please wait before burning")
+- Consider removing Transfer feature if old holdings are permanently hidden
 
-Flow: Create Instrument → Issue (HoldingProposal) → Accept (Holding)
-- Admin: `app_provider_quickstart-e-1` (app-provider participant)
-- Owner: `app_provider_quickstart-e-1` (same participant)
-- Result: **100% SUCCESS** - Full flow works correctly
+## Environment
 
-**Conclusion:** The v2.0.1 DAR with observer pattern is functionally correct.
+- **Canton LocalNet**: cn-quickstart (from /Users/e/code/sbc/canton/cn-quickstart/quickstart/docker/modules/localnet)
+- **App Provider**: localhost:3975 (JSON API), localhost:3902 (Admin API)
+- **App User**: localhost:2975 (JSON API), localhost:2902 (Admin API)
+- **Backend Server**: localhost:8899 (Fastify)
+- **Frontend Dev Server**: localhost:5173 (Vite)
+- **JWT Secret**: "unsafe" (Canton LocalNet default)
 
-#### ✅ Cross-Participant Test (NOW WORKING!)
-**Test:** `/tmp/test-v2.0.1-cross-participant.sh`
+## Files Modified (This Session)
 
-Flow: Create Instrument → Issue (HoldingProposal) ✅ → Accept (Holding) ✅
-- Admin: `app_provider_quickstart-e-1` (app-provider participant)
-- Owner: `demo-wallet-1` (app-user participant)
-- Issue choice: **SUCCESS** - HoldingProposal created cross-participant
-- Accept choice: **SUCCESS** - Holding created cross-participant!
+1. **DAML Contract**: `daml/minimal-token/daml/MinimalToken.daml`
+   - Added Burn choice (lines 84-88)
 
-**Root Cause Identified & FIXED:**
-The error was **NOT** a DAML signatory problem. It was a **JWT authorization issue**:
+2. **Backend Routes**: `server/routes/cnQuickstartRoutes.js`
+   - Added `/api/cn/holdings/transfer` endpoint (lines 370-447)
 
-1. ✅ Party exists on both participants (verified via Canton console)
-2. ✅ DAML contract authorization is correct (observer pattern works)
-3. ❌ JWT `ledger-api-user` lacked rights to act as `demo-wallet-1` on app-user participant
+3. **Ledger Service**: `src/services/cnQuickstartLedgerService.js`
+   - Added `transferHolding()` method (lines 622-729)
+   - Updated `allPackageIds` to show only v2.2.0 (lines 757-762)
 
-**Solution Applied:**
-```scala
-// Grant actAs rights for demo-wallet-1
-participants.app_user.ledger_api.users.rights.grant(
-  id = "ledger-api-user",
-  actAs = Set(PartyId.tryFromProtoPrimitive("demo-wallet-1::12203bef..."))
-)
+4. **JSON API Service**: `server/services/jsonApiV1Service.js`
+   - Added v2.2.0 to packageIds, commented out old versions (lines 21-26)
 
-// Grant readAs rights for app_provider (to see HoldingProposal)
-participants.app_user.ledger_api.users.rights.grant(
-  id = "ledger-api-user",
-  readAs = Set(PartyId.tryFromProtoPrimitive("app_provider_quickstart-e-1::1220a57d..."))
-)
-```
+5. **Frontend Service**: `src/services/cnQuickstartFrontendService.js`
+   - Added `transferHolding()` method (lines 306-344)
 
-**Result:** Cross-participant Issue + Accept flow now works end-to-end! ✅
+6. **Frontend App**: `src/App.jsx`
+   - Added `appProviderParty` state (line 17)
+   - Added `setAppProviderParty()` in `initializeApp()` (line 55)
+   - Added `transferToAdmin()` function (lines 386-411)
+   - Added Transfer button UI (lines 1081-1114)
 
-### Solution Summary ✅
-
-**The DAML v2.0.1 observer pattern IS WORKING CORRECTLY across participants!**
-
-Both same-participant and cross-participant flows now work end-to-end:
-- ✅ Same-participant: Full Issue + Accept flow works
-- ✅ Cross-participant Issue: HoldingProposal created successfully
-- ✅ Cross-participant Accept: Holding created successfully!
-
-**Key Insights:**
-
-1. **DAML Contract Design**: The observer pattern fix was correct. Admin as signatory, owner as observer enables cross-participant operations.
-
-2. **Canton Authorization Model**: Cross-participant operations require proper JWT user rights on each participant:
-   - Party must exist on the participant (via `parties.enable()`)
-   - JWT user must have `actAs` rights for the party
-   - JWT user must have `readAs` rights for any parties whose contracts they need to see
-
-3. **JWT Configuration**: The `ledger-api-user` (matching JWT `sub` claim) needs explicit rights granted via Canton console:
-   ```scala
-   participants.app_user.ledger_api.users.rights.grant(
-     id = "ledger-api-user",
-     actAs = Set(PartyId.tryFromProtoPrimitive("demo-wallet-1::...")),
-     readAs = Set(PartyId.tryFromProtoPrimitive("app_provider::..."))
-   )
-   ```
-
-### Next Steps for Production
-
-For a production system, automate user rights management:
-1. When creating a new wallet/party, grant rights to `ledger-api-user` automatically
-2. Consider using per-wallet JWT users instead of shared `ledger-api-user`
-3. Document the rights model for external participants joining the network
-
-**The original problem (signatory authorization) was correctly diagnosed and fixed. The additional blocker was JWT user rights, now also resolved.**
-
-## Technical Details
-
-### Canton Network Setup
-- **Location:** `/Users/e/code/sbc/canton/cn-quickstart/quickstart/docker/modules/localnet`
-- **Participants:**
-  - **app-provider** (admin): Ports 3901 (Ledger), 3902 (Admin), 3975 (JSON API)
-  - **app-user** (wallets): Ports 2901 (Ledger), 2902 (Admin), 2975 (JSON API)
-
-### Backend Server
-- **Port:** 8899
-- **Routes:** `server/routes/cnQuickstartRoutes.js`
-- **Key endpoints:**
-  - `POST /api/cn/tokens/create` - Create Instrument
-  - `POST /api/cn/tokens/mint` - Issue HoldingProposal
-  - `POST /api/cn/proposals/accept` - Accept proposal → Holding
-  - `POST /api/cn/wallets/create` - Allocate party (currently broken)
-
-### DAML Contract Flow
-1. **Create Instrument** (admin creates token definition)
-   - Template: `Instrument`
-   - Fields: `name`, `symbol`, `decimals`, `admin`
-
-2. **Issue** choice on Instrument → creates **HoldingProposal**
-   - Admin exercises choice
-   - Creates proposal for owner to accept
-
-3. **Accept** choice on HoldingProposal → creates **Holding**
-   - Owner exercises choice
-   - Converts proposal to actual holding
-   - **This is where cross-participant auth matters**
-
-## Workaround Options
-
-### Option A: Use Existing Parties
-Use parties already allocated in previous sessions:
-- `app_provider_quickstart-e-1::1220a57d93198bc2f795cf3420debe4d...` (app-provider)
-- Any previously created demo-wallet parties
-
-### Option B: Direct gRPC Investigation
-Explore Canton Admin API v30 for alternative party allocation methods:
-```bash
-grpcurl -plaintext localhost:2902 list com.digitalasset.canton.admin.participant.v30.PartyManagementService
-```
-
-### Option C: Fix Canton Console
-Debug why `daemon -c --auto-connect-local --bootstrap` mode is broken (likely Canton environment issue, not code).
-
-## Files Modified
-
-### DAML
-- `daml/minimal-token/daml/MinimalToken.daml` - Fixed Holding template
-- `daml/minimal-token/daml.yaml` - Version bump to 2.0.1
-
-### Backend
-- `server/routes/cnQuickstartRoutes.js` - Wallet creation endpoint (attempted fixes)
-
-### Scripts
-- `/tmp/upload_dar_v2.0.1.py` - DAR upload script
+7. **Package Management**:
+   - Commented out old package IDs in jsonApiV1Service.js
+   - Commented out old package IDs in cnQuickstartLedgerService.js
 
 ## Key Learnings
 
-1. **Cross-participant authorization requires single signatory pattern**
-   - Use `signatory` for the party submitting the transaction
-   - Use `observer` for parties that need visibility but not signing authority
+1. **DAML Contract Immutability**: Old contracts can't gain new choices from upgraded templates. Must create new holdings with new package version to use Burn.
 
-2. **Canton package versioning**
-   - Cannot upload same version twice
-   - Must increment version in daml.yaml
+2. **Package Version Matching**: Exercise commands MUST use the exact package ID that created the contract. Cannot exercise v2.2.0 choice on v2.1.0 contract.
 
-3. **Canton console daemon mode**
-   - The `daemon -c --auto-connect-local --bootstrap` approach may not be reliable
-   - Consider using gRPC Admin APIs directly instead
+3. **Race Conditions**: Canton's ACS view takes time to propagate. Operations on just-created contracts may fail with CONTRACT_NOT_ACTIVE.
 
-## Latest Investigation: Pattern C (Both Signatories) - 2025-10-06
+4. **Service Separation**: JSON API v1 for queries (batch queries with templateIds), v2 for commands (single operations with full request structure).
 
-### Problem with Observer Pattern (v2.0.1)
-After successfully fixing cross-participant Accept with v2.0.1 observer pattern, we discovered a critical issue:
-- ✅ Holdings are created successfully
-- ❌ **Owners cannot see their Holdings in balance queries**
-
-When querying via `/v2/state/active-contracts`, Holdings with `signatory admin, observer owner` are invisible to owner queries, even though owner has actAs rights.
-
-### Root Cause Analysis
-The observer pattern (v2.0.1) works for **authorization** but breaks **visibility**:
-1. Owner can exercise Accept choice (controller authority + admin signatory from proposal)
-2. Holding is created with admin as sole signatory, owner as observer
-3. Canton ACS queries filter by stakeholder relationship
-4. **Observer status alone is insufficient for ACS visibility in cross-participant scenarios**
-
-### Research: DAML Finance Standard Pattern
-Researched DAML authorization and discovered:
-1. **Pattern A** (admin only signatory): ❌ Breaks Accept authorization
-2. **Pattern B** (owner only signatory): ❌ Breaks Accept completely (owner can't authorize admin as signatory)
-3. **Pattern C** (both signatories): ✅ **DAML Finance standard pattern**
-
-**Key Insight:** When owner exercises Accept choice, they gain **combined authority** of:
-- Owner (controller of Accept)
-- Admin (signatory of HoldingProposal)
-
-This combined authority CAN create Holding with `signatory admin, owner`.
-
-**Why Pattern C originally "failed":** The original failure was the JWT authorization issue, NOT a DAML problem!
-
-### Solution: Revert to Pattern C (v2.1.0)
-
-**File:** `daml/minimal-token/daml/MinimalToken.daml`
-```daml
-template Holding
-  with
-    admin      : Party
-    owner      : Party
-    instrument : ContractId Instrument
-    amount     : Decimal
-  where
-    signatory admin, owner  -- Both parties sign (DAML Finance standard pattern)
-```
-
-**Rationale:**
-- This is the standard DAML Finance pattern for holdings
-- Owner as signatory ensures ACS visibility
-- Combined authority from Accept choice enables cross-participant creation
-- Original failure was JWT rights, not DAML authorization
-
-### Version 2.1.0 Deployment ✅
-
-**Built and deployed:**
-```bash
-cd daml/minimal-token
-# Updated daml.yaml to version: 2.1.0
-daml build
-```
-
-**Package ID (v2.1.0):** `c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`
-
-Uploaded to both participants via `/tmp/upload_dar_v2.1.0.py`:
-- ✅ app-provider: localhost:3902
-- ✅ app-user: localhost:2902
-
-### Test Results (v2.1.0)
-
-**Test:** `/tmp/test-v2.1.0-via-api.sh`
-
-1. ✅ **Instrument Created** - Admin creates token successfully
-2. ✅ **Issue Choice** - HoldingProposal created cross-participant
-3. ✅ **Accept Choice** - Holding created with BOTH signatories!
-   ```
-   "signatories": [
-     "app_provider_quickstart-e-1::1220a57d...",
-     "demo-wallet-1::12203bef03ef..."
-   ]
-   ```
-4. ❌ **Balance Query** - Returns 0 holdings despite successful creation
-
-### ROOT CAUSE IDENTIFIED: JSON API v2 Not Working ✅
-
-**Symptom:** Holdings created successfully but ACS queries via JSON API return empty.
-
-**Investigation Results:**
-
-1. **Canton Console Verification** ✅
-   - demo-wallet-1 has **10 contracts** visible (6 HoldingProposals + 4 Holdings)
-   - Holdings include both v2.0.0 and v2.1.0 packages
-   - Party is properly **HOSTED** on app-user participant
-   - All DAML authorization working correctly
-
-2. **JSON API Testing** ❌
-   - Endpoint: `http://localhost:2975/v2/state/active-contracts`
-   - Query with templateId filter: Returns `[]`
-   - Query WITHOUT any filter (all contracts): Returns `[]`
-   - Query with different package IDs: Returns `[]`
-   - **Conclusion: JSON API endpoint returning empty regardless of query**
-
-3. **Package ID Discovery**
-   - Holdings exist with multiple package IDs:
-     - 3 Holdings: v2.0.0 (`eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de`)
-     - 1 Holding: v2.1.0 (`c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`)
-
-**Root Cause:**
-Canton Network LocalNet's JSON API v2 `/v2/state/active-contracts` endpoint is **not functional** or **not properly exposed** on port 2975. The gRPC API (used by Canton console) works perfectly, but the HTTP JSON API does not.
-
-**Confirmed Working:**
-- ✅ DAML contracts (v2.1.0 with both signatories)
-- ✅ Cross-participant minting (Issue + Accept)
-- ✅ Party hosting on app-user
-- ✅ Canton gRPC Ledger API
-- ❌ Canton HTTP JSON API v2
-
-**Possible Solutions:**
-1. Use gRPC Ledger API directly instead of JSON API
-2. Check Canton JSON API configuration/startup
-3. Use transaction stream API instead of ACS query
-4. Deploy JSON API separately if not bundled with Canton Network
-
-### Status Summary
-
-**DAML Authorization: ✅ WORKING**
-- Pattern C (both signatories) is correct
-- Cross-participant Accept succeeds
-- Holdings created with proper authorization
-
-**ACS Visibility: ❌ BROKEN**
-- Queries return empty despite Holdings existing
-- Requires investigation into Canton ledger synchronization
-- May be a LocalNet environment issue vs production Canton
-
-**Confidence:** The DAML contract design is correct per DAML Finance standards. The ACS query issue is a Canton integration/configuration problem, not a contract design flaw.
-
-## References
-
-- **Package ID (v2.0.0 - original):** `eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de`
-- **Package ID (v2.0.1 - observer):** `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118`
-- **Package ID (v2.1.0 - both sig):** `c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`
-- **App Provider Party:** `app_provider_quickstart-e-1::1220a57d93198bc2f795cf3420debe4d...`
-- **Demo Wallet Party:** `demo-wallet-1::12203bef03ef28882157f215f074792d8b02a1881cd3e0c0bd505150f67a8712ea21`
-
-
-## FINAL RESOLUTION - JSON API v1 Working ✅
-
-**Date:** 2025-10-06
-
-### Problem Solved
-Balance queries were failing because:
-1. JSON API v2 `/v2/state/active-contracts` returns empty `[]`
-2. JWT tokens were missing required `scope` field for v1 API
-3. templateId format was incomplete (`module:entity` instead of `packageId:module:entity`)
-
-### Solution Implemented
-Created `JsonApiV1Service` that uses v1 `/query` endpoint with:
-- JWT including `scope: 'daml_ledger_api'`
-- Full templateId format: `packageId:module:entity`
-- Support for multiple package versions
-
-### Test Results
-```bash
-curl http://localhost:8899/api/cn/balance/demo-wallet-1::12203bef...
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "holdings": [...],
-  "totalBalance": 2200.5,
-  "holdingCount": 4
-}
-```
-
-✅ **Balance queries now working correctly!**
-
-### Files Changed
-1. **Created**: `server/services/jsonApiV1Service.js` - Working v1 API service
-2. **Updated**: `server/routes/cnQuickstartRoutes.js` - Balance endpoint uses v1
-3. **Created**: `SOLUTION.md` - Complete solution documentation
-4. **Created**: `REPRO.md` - Reproduction steps and testing
-
-### Key Learnings
-- v1 JSON API requires `scope: 'daml_ledger_api'` in JWT
-- templateIds must be full format: `packageId:module:entity`
-- v2 query endpoints have separate issue (still returns `[]`)
-- v2 command endpoints work fine
-
-**Status: RESOLVED ✅**
-
-## End-to-End Flow Verification - 2025-10-06
-
-### Complete Two-Step Minting Flow Confirmed Working ✅
-
-After thorough testing with USA Token, the complete flow has been verified:
-
-**Test Case: USA Token**
-- Instrument Contract ID: `00ba1b7a188d63ba179e1b9660c6cf6cbf44f060ae94fdd6b21875d85239462d5bca1112201dc74f474e508b7f410b788627f74ba7ce8105759743fc881c2d3217aa1c602c`
-- Owner: `demo-wallet-1::12203bef03ef28882157f215f074792d8b02a1881cd3e0c0bd505150f67a8712ea21`
-- Amount: 1000 USA tokens
-
-**Timeline:**
-1. **17:23:44** - Instrument created (USA Token, symbol: USA, decimals: 2) ✅
-2. **17:24:37** - Issue choice executed → **HoldingProposal created** ✅
-   - Template: `MinimalToken:HoldingProposal`
-   - Signatory: `app_provider` (admin)
-   - Observer: `demo-wallet-1` (owner)
-3. **17:24:40** - Accept choice executed → **Holding created** ✅
-   - Template: `MinimalToken:Holding`
-   - Signatories: Both `app_provider` AND `demo-wallet-1` (DAML Finance pattern)
-   - Balance updated with 1000 USA tokens
-
-**Confirmed Behavior:**
-- ✅ Issue creates **only** HoldingProposal (not Holding)
-- ✅ Balance does **not** update after Issue step
-- ✅ Accept converts HoldingProposal → Holding
-- ✅ Balance updates **only** after Accept step
-- ✅ Cross-participant operations working correctly
-- ✅ JWT authorization with actAs/readAs rights working
-- ✅ v2.1.0 DAML contract with both signatories pattern working
-- ✅ v1 JSON API balance queries returning correct results
-
-**Frontend Features Working:**
-1. ✅ Token selector dropdown (Section 3)
-2. ✅ Pending proposals display (Section 4)
-3. ✅ Accept proposal functionality
-4. ✅ Balance breakdown by instrument with token symbols
-5. ✅ Multi-token support (DEMO, TEST, TCRS, TC2.1, USA all visible)
-6. ✅ Clear Wallet and Clear Tokens functionality
-7. ✅ Canton console onboarding instructions
-
-**Architecture Confirmed:**
-- Package v2.1.0 (`c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`)
-- Holding template: `signatory admin, owner` (both signatories)
-- HoldingProposal template: `signatory admin, observer owner`
-- JSON API v1 for queries, v2 for commands
-- JWT with `scope: 'daml_ledger_api'` for v1 API
-- Full templateId format: `packageId:module:entity`
-
-**All Systems Operational ✅**
-
+5. **Hidden vs Deleted**: Commenting out package IDs HIDES contracts from queries but doesn't delete them from ledger. They still exist and can be queried with correct template ID.

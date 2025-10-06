@@ -260,6 +260,211 @@ class CNQuickstartFrontendService {
   }
 
   /**
+   * Propose to burn a Holding contract (cross-participant pattern)
+   */
+  async proposeBurnHolding(holdingId, owner) {
+    try {
+      console.log('🔥 Proposing burn via CN Quickstart...', { holdingId, owner });
+
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      const response = await fetch(`${this.baseUrl}${this.apiPrefix}/holdings/propose-burn`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          holdingId,
+          owner
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Propose burn failed: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log('✅ Burn proposal created successfully:', result);
+        return result;
+      } else {
+        throw new Error(result.message || 'Propose burn failed');
+      }
+    } catch (error) {
+      console.error('❌ Failed to propose burn:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Accept a BurnProposal (admin only)
+   */
+  async acceptBurnProposal(proposalId, admin) {
+    try {
+      console.log('✅ Accepting burn proposal via CN Quickstart...', { proposalId, admin });
+
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      const response = await fetch(`${this.baseUrl}${this.apiPrefix}/burn-proposals/accept`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          proposalId,
+          admin
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Accept burn proposal failed: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log('✅ Burn proposal accepted successfully:', result);
+        return result;
+      } else {
+        throw new Error(result.message || 'Accept burn proposal failed');
+      }
+    } catch (error) {
+      console.error('❌ Failed to accept burn proposal:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Query BurnProposals for a party
+   */
+  async queryBurnProposals(party) {
+    try {
+      console.log('🔄 Querying burn proposals via CN Quickstart...', { party });
+
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      const response = await fetch(`${this.baseUrl}${this.apiPrefix}/burn-proposals/${party}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Query burn proposals failed: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log('✅ Burn proposals queried successfully:', result);
+        return result;
+      } else {
+        throw new Error(result.message || 'Query burn proposals failed');
+      }
+    } catch (error) {
+      console.error('❌ Failed to query burn proposals:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Burn a Holding contract (reduce supply) - LEGACY METHOD
+   * NOTE: This may not work for cross-participant Holdings with dual signatories.
+   * Use proposeBurnHolding() + acceptBurnProposal() for cross-participant burns.
+   */
+  async burnHolding(holdingId, owner) {
+    try {
+      console.log('🔥 Burning holding via CN Quickstart...', { holdingId, owner });
+
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      const response = await fetch(`${this.baseUrl}${this.apiPrefix}/holdings/burn`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          holdingId,
+          owner
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Burn failed: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log('✅ Holding burned successfully:', result);
+        return result;
+      } else {
+        throw new Error(result.message || 'Burn failed');
+      }
+    } catch (error) {
+      console.error('❌ Failed to burn holding:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Transfer tokens to another party
+   */
+  async transferHolding(holdingId, owner, recipient, amount) {
+    try {
+      console.log('🔄 Transferring holding via CN Quickstart...', { holdingId, owner, recipient, amount });
+
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      const response = await fetch(`${this.baseUrl}${this.apiPrefix}/holdings/transfer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          holdingId,
+          owner,
+          recipient,
+          amount: amount.toString()
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Transfer failed: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log('✅ Transfer successful:', result);
+        return result;
+      } else {
+        throw new Error(result.message || 'Transfer failed');
+      }
+    } catch (error) {
+      console.error('❌ Failed to transfer holding:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get token balance for wallet
    */
   async getTokenBalance(owner, instrumentId = null) {

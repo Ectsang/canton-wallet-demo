@@ -299,6 +299,358 @@ export default async function cnQuickstartRoutes(app) {
     }
   });
 
+  // POST /api/cn/holdings/burn - Burn tokens by exercising Burn choice
+  app.post('/api/cn/holdings/burn', {
+    schema: {
+      description: 'Burn tokens by exercising the Burn choice on a Holding contract (owner only)',
+      tags: ['cn-quickstart'],
+      body: {
+        type: 'object',
+        properties: {
+          holdingId: { type: 'string', description: 'Holding contract ID to burn' },
+          owner: { type: 'string', description: 'Owner party ID (must be authorized to burn)' }
+        },
+        required: ['holdingId', 'owner']
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            holdingId: { type: 'string' },
+            owner: { type: 'string' },
+            transactionId: { type: 'string' },
+            burnedAt: { type: 'string' }
+          }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    try {
+      const { holdingId, owner } = req.body;
+
+      app.log.info('Burning holding via CN Quickstart', {
+        holdingId,
+        owner
+      });
+
+      const service = getLedgerService();
+      const result = await service.burnHolding({
+        holdingId,
+        owner
+      });
+
+      app.log.info('Holding burned successfully', {
+        holdingId: result.holdingId,
+        owner: result.owner,
+        transactionId: result.transactionId
+      });
+
+      return result;
+
+    } catch (error) {
+      app.log.error('Failed to burn holding', { error: error.message });
+      reply.code(400);
+      return {
+        success: false,
+        error: 'BurnHoldingFailed',
+        message: error.message
+      };
+    }
+  });
+
+  // POST /api/cn/holdings/propose-burn - Propose to burn tokens (cross-participant pattern)
+  app.post('/api/cn/holdings/propose-burn', {
+    schema: {
+      description: 'Propose to burn tokens by exercising ProposeBurn choice on a Holding contract (owner only)',
+      tags: ['cn-quickstart'],
+      body: {
+        type: 'object',
+        properties: {
+          holdingId: { type: 'string', description: 'Holding contract ID to propose burning' },
+          owner: { type: 'string', description: 'Owner party ID (must be authorized to propose burn)' }
+        },
+        required: ['holdingId', 'owner']
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            proposalId: { type: 'string' },
+            holdingId: { type: 'string' },
+            owner: { type: 'string' },
+            transactionId: { type: 'string' },
+            proposedAt: { type: 'string' }
+          }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    try {
+      const { holdingId, owner } = req.body;
+
+      app.log.info('Proposing burn via CN Quickstart', {
+        holdingId,
+        owner
+      });
+
+      const service = getLedgerService();
+      const result = await service.proposeBurnHolding({
+        holdingId,
+        owner
+      });
+
+      app.log.info('Burn proposal created successfully', {
+        proposalId: result.proposalId,
+        holdingId: result.holdingId,
+        owner: result.owner
+      });
+
+      return result;
+
+    } catch (error) {
+      app.log.error('Failed to propose burn', { error: error.message });
+      reply.code(400);
+      return {
+        success: false,
+        error: 'ProposeBurnFailed',
+        message: error.message
+      };
+    }
+  });
+
+  // POST /api/cn/burn-proposals/accept - Accept a BurnProposal to archive Holding
+  app.post('/api/cn/burn-proposals/accept', {
+    schema: {
+      description: 'Accept a BurnProposal by exercising the AcceptBurn choice (admin only)',
+      tags: ['cn-quickstart'],
+      body: {
+        type: 'object',
+        properties: {
+          proposalId: { type: 'string', description: 'BurnProposal contract ID to accept' },
+          admin: { type: 'string', description: 'Admin party ID (must be authorized to accept)' }
+        },
+        required: ['proposalId', 'admin']
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            proposalId: { type: 'string' },
+            admin: { type: 'string' },
+            transactionId: { type: 'string' },
+            acceptedAt: { type: 'string' }
+          }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    try {
+      const { proposalId, admin } = req.body;
+
+      app.log.info('Accepting burn proposal via CN Quickstart', {
+        proposalId,
+        admin
+      });
+
+      const service = getLedgerService();
+      const result = await service.acceptBurnProposal({
+        proposalId,
+        admin
+      });
+
+      app.log.info('Burn proposal accepted successfully', {
+        proposalId: result.proposalId,
+        admin: result.admin,
+        transactionId: result.transactionId
+      });
+
+      return result;
+
+    } catch (error) {
+      app.log.error('Failed to accept burn proposal', { error: error.message });
+      reply.code(400);
+      return {
+        success: false,
+        error: 'AcceptBurnProposalFailed',
+        message: error.message
+      };
+    }
+  });
+
+  // GET /api/cn/burn-proposals/:party - Query BurnProposals for a party
+  app.get('/api/cn/burn-proposals/:party', {
+    schema: {
+      description: 'Query BurnProposals for a specific party (owner or admin)',
+      tags: ['cn-quickstart'],
+      params: {
+        type: 'object',
+        properties: {
+          party: { type: 'string', description: 'Party ID to query burn proposals for' }
+        },
+        required: ['party']
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            proposals: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  proposalId: { type: 'string' },
+                  owner: { type: 'string' },
+                  admin: { type: 'string' },
+                  holding: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    try {
+      const { party } = req.params;
+
+      app.log.info('Querying burn proposals via CN Quickstart', { party });
+
+      const v1Service = getJsonApiV1Service();
+      const result = await v1Service.queryBurnProposals(party);
+
+      app.log.info('Burn proposals query successful', {
+        party,
+        proposalCount: result.proposals.length
+      });
+
+      return result;
+
+    } catch (error) {
+      app.log.error('Failed to query burn proposals', { error: error.message });
+      reply.code(400);
+      return {
+        success: false,
+        error: 'QueryBurnProposalsFailed',
+        message: error.message
+      };
+    }
+  });
+
+  // POST /api/cn/holdings/transfer - Transfer tokens by exercising Transfer choice
+  app.post('/api/cn/holdings/transfer', {
+    schema: {
+      description: 'Transfer tokens by exercising the Transfer choice on a Holding contract (owner only)',
+      tags: ['cn-quickstart'],
+      body: {
+        type: 'object',
+        properties: {
+          holdingId: { type: 'string', description: 'Holding contract ID to transfer from' },
+          owner: { type: 'string', description: 'Owner party ID (must be authorized to transfer)' },
+          recipient: { type: 'string', description: 'Recipient party ID' },
+          amount: { type: 'string', description: 'Amount to transfer' }
+        },
+        required: ['holdingId', 'owner', 'recipient', 'amount']
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            holdingId: { type: 'string' },
+            owner: { type: 'string' },
+            recipient: { type: 'string' },
+            amount: { type: 'number' },
+            newHoldingId: { type: 'string' },
+            changeHoldingId: { type: 'string' },
+            transactionId: { type: 'string' },
+            transferredAt: { type: 'string' }
+          }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (req, reply) => {
+    try {
+      const { holdingId, owner, recipient, amount } = req.body;
+
+      app.log.info('Transferring holding via CN Quickstart', {
+        holdingId,
+        owner,
+        recipient,
+        amount
+      });
+
+      const service = getLedgerService();
+      const result = await service.transferHolding({
+        holdingId,
+        owner,
+        recipient,
+        amount
+      });
+
+      app.log.info('Holding transferred successfully', {
+        holdingId: result.holdingId,
+        owner: result.owner,
+        recipient: result.recipient,
+        transactionId: result.transactionId
+      });
+
+      return result;
+
+    } catch (error) {
+      app.log.error('Failed to transfer holding', { error: error.message });
+      reply.code(400);
+      return {
+        success: false,
+        error: 'TransferHoldingFailed',
+        message: error.message
+      };
+    }
+  });
+
   // GET /api/cn/balance/:owner - Query token balance for wallet
   app.get('/api/cn/balance/:owner', {
     schema: {

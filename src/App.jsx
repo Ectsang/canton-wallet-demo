@@ -38,6 +38,7 @@ function App() {
   // Proposal state
   const [pendingProposal, setPendingProposal] = useState(null);
   const [allProposals, setAllProposals] = useState([]);
+  const [burnProposals, setBurnProposals] = useState([]);
 
   useEffect(() => {
     initializeApp();
@@ -52,10 +53,11 @@ function App() {
       const initResult = await cantonService.initialize();
       setIsInitialized(true);
       setIsConnected(true);
-      
+      setAppProviderParty(initResult.appProviderParty);  // Save admin party
+
       // Load existing wallet and token data
       await loadExistingData();
-      
+
       setSuccess(`Connected to CN Quickstart: ${initResult.appProviderParty}`);
     } catch (err) {
       setError(`Failed to initialize CN Quickstart: ${err.message}`);
@@ -132,7 +134,7 @@ function App() {
           return merged;
         });
 
-        // Group holdings by instrument for breakdown
+        // Group holdings by instrument for breakdown (with individual holdings for burn)
         const byInstrument = {};
         result.holdings.forEach(holding => {
           const inst = holding.instrument;
@@ -144,15 +146,22 @@ function App() {
               count: 0,
               name: instrumentInfo?.name || 'Unknown Token',
               symbol: instrumentInfo?.symbol || '???',
-              decimals: instrumentInfo?.decimals || 0
+              decimals: instrumentInfo?.decimals || 0,
+              holdings: []  // Track individual holdings for burn
             };
           }
           byInstrument[inst].amount += holding.amount;
           byInstrument[inst].count += 1;
+          byInstrument[inst].holdings.push({
+            contractId: holding.contractId,
+            amount: holding.amount
+          });
         });
 
-        setBalanceBreakdown(Object.values(byInstrument));
+        const breakdown = Object.values(byInstrument);
+        setBalanceBreakdown(breakdown);
         console.log('✅ Loaded current token balance:', totalBalance, 'across', Object.keys(byInstrument).length, 'instruments');
+        console.log('📊 Balance breakdown with holdings:', JSON.stringify(breakdown, null, 2));
       } else {
         setTokenBalance(0);
         setBalanceBreakdown([]);
@@ -351,6 +360,58 @@ function App() {
     }
   };
 
+  const burnHolding = async (holdingId, amount, symbol) => {
+    try {
+      setLoading(true);
+      setError('');
+      setSuccess('');
+
+      console.log('🔥 Proposing burn for holding:', holdingId);
+
+      // Propose burn (owner creates BurnProposal)
+      const result = await cantonService.proposeBurnHolding(
+        holdingId,
+        wallet.partyId
+      );
+
+      setSuccess(`🔥 Burn proposal created for ${amount} ${symbol} tokens! Waiting for admin to accept...`);
+
+      // Update balance to reflect proposal
+      await updateBalance();
+    } catch (err) {
+      setError(`Failed to propose burn: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const transferToAdmin = async (holdingId, amount, symbol) => {
+    try {
+      setLoading(true);
+      setError('');
+      setSuccess('');
+
+      console.log('🔄 Transferring holding back to admin:', holdingId);
+
+      // Transfer the full amount back to admin
+      const result = await cantonService.transferHolding(
+        holdingId,
+        wallet.partyId,
+        appProviderParty,  // Transfer to admin
+        amount.toString()
+      );
+
+      setSuccess(`✅ Transferred ${amount} ${symbol} tokens back to admin!`);
+
+      // Update balance
+      await updateBalance();
+    } catch (err) {
+      setError(`Failed to transfer tokens: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateBalance = async () => {
     try {
       if (!wallet) return;
@@ -367,7 +428,7 @@ function App() {
         // Get instrument metadata from result
         const instruments = result.instruments || {};
 
-        // Group holdings by instrument
+        // Group holdings by instrument (with individual holdings for burn functionality)
         const byInstrument = {};
         result.holdings.forEach(holding => {
           const inst = holding.instrument;
@@ -379,19 +440,29 @@ function App() {
               count: 0,
               name: instrumentInfo?.name || 'Unknown Token',
               symbol: instrumentInfo?.symbol || '???',
-              decimals: instrumentInfo?.decimals || 0
+              decimals: instrumentInfo?.decimals || 0,
+              holdings: []  // Track individual holdings for burn
             };
           }
           byInstrument[inst].amount += holding.amount;
           byInstrument[inst].count += 1;
+          byInstrument[inst].holdings.push({
+            contractId: holding.contractId,
+            amount: holding.amount
+          });
         });
 
-        setBalanceBreakdown(Object.values(byInstrument));
+        const breakdown = Object.values(byInstrument);
+        setBalanceBreakdown(breakdown);
         console.log(`✅ Updated balance: ${result.totalBalance} (${result.holdingCount} holdings across ${Object.keys(byInstrument).length} instruments)`);
+        console.log('📊 Balance breakdown with holdings:', JSON.stringify(breakdown, null, 2));
       } else {
         setTokenBalance(0);
         setBalanceBreakdown([]);
       }
+
+      // Also load burn proposals when updating balance
+      await loadBurnProposals();
     } catch (err) {
       console.error('Failed to update balance:', err);
       setTokenBalance(0);
@@ -424,6 +495,69 @@ function App() {
     } catch (err) {
       console.error('❌ Accept proposal error:', err);
       setError(`Failed to accept proposal: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadBurnProposals = async () => {
+    // Get current token from state or storage
+    const currentToken = createdToken || storageService.getToken();
+
+    if (!currentToken) {
+      console.log('⚠️ Cannot load burn proposals - no token created yet');
+      return;
+    }
+
+    try {
+      console.log('🔄 Loading burn proposals for admin:', currentToken.admin);
+
+      // Query burn proposals for the admin (who needs to accept them)
+      const result = await cantonService.queryBurnProposals(currentToken.admin);
+
+      console.log('✅ Burn proposals loaded:', result.proposals);
+      setBurnProposals(result.proposals || []);
+    } catch (err) {
+      console.error('❌ Failed to load burn proposals:', err);
+      // Don't set error state - this is a background operation
+    }
+  };
+
+  const acceptBurnProposal = async (proposal) => {
+    try {
+      setLoading(true);
+      setError('');
+      setSuccess('');
+
+      console.log('🔥 Accepting burn proposal:', proposal);
+
+      // Get current token from state or storage
+      const currentToken = createdToken || storageService.getToken();
+
+      if (!currentToken) {
+        throw new Error('No token found - cannot accept burn proposal');
+      }
+
+      // Accept the burn proposal (admin accepts)
+      const result = await cantonService.acceptBurnProposal(
+        proposal.proposalId,
+        currentToken.admin
+      );
+
+      console.log('✅ Burn proposal accepted successfully!', result);
+      setSuccess(`✅ Burn approved! Holding has been burned.`);
+
+      // Wait a moment for Canton to process the archive
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Reload burn proposals and balance
+      await loadBurnProposals();
+      await updateBalance();
+
+      console.log('✅ Burn proposals and balance updated');
+    } catch (err) {
+      console.error('❌ Accept burn proposal error:', err);
+      setError(`Failed to accept burn proposal: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -888,7 +1022,10 @@ participants.app_user.ledger_api.users.rights.grant(
                   <h3 style={{ marginTop: 0 }}>Proposal #{index + 1}</h3>
 
                   <div className="wallet-detail">
-                    <strong>Amount:</strong> {proposal.amount}
+                    <strong>Amount:</strong> {proposal.amount} {(() => {
+                      const token = allTokens.find(t => t.contractId === proposal.instrument);
+                      return token ? token.symbol : '';
+                    })()}
                   </div>
 
                   <div className="wallet-detail">
@@ -953,44 +1090,195 @@ participants.app_user.ledger_api.users.rights.grant(
         </div>
       )}
 
-      {/* Token Minting - Two Step Flow */}
-      {createdToken && (
+      {/* Admin Panel: Burn Proposals - Show when token exists and there are pending burn proposals */}
+      {createdToken && burnProposals && burnProposals.length > 0 && (
         <div className="card">
-          <h2>5. Mint Tokens (Two-Step Flow)</h2>
+          <h2>🔥 Admin: Burn Proposals</h2>
+          <div className="info-box">
+            <p style={{ marginBottom: '1rem', color: '#666' }}>
+              As the token admin, you can review and approve burn requests from users.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {burnProposals.map((proposal, index) => (
+                <div key={proposal.proposalId} style={{
+                  padding: '1rem',
+                  border: '2px solid #ff9800',
+                  borderRadius: '8px',
+                  backgroundColor: '#fff3e0'
+                }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', color: '#e65100' }}>
+                    Burn Request #{index + 1}
+                  </h4>
+
+                  <div className="wallet-detail">
+                    <strong>Proposal ID:</strong>
+                    <div className="copyable-field">
+                      <code style={{ fontSize: '0.85em' }}>{proposal.proposalId.substring(0, 40)}...</code>
+                      <button
+                        className="copy-btn"
+                        onClick={() => copyToClipboard(proposal.proposalId, 'Proposal ID')}
+                        title="Copy Proposal ID"
+                      >
+                        📋
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="wallet-detail">
+                    <strong>Holding ID:</strong>
+                    <code style={{ fontSize: '0.75em', wordBreak: 'break-all' }}>{proposal.holding.substring(0, 50)}...</code>
+                  </div>
+
+                  <div className="wallet-detail">
+                    <strong>From Owner:</strong>
+                    <code style={{ fontSize: '0.75em', wordBreak: 'break-all' }}>{proposal.owner.substring(0, 50)}...</code>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                    <button
+                      className="button primary"
+                      onClick={() => acceptBurnProposal(proposal)}
+                      disabled={loading}
+                      style={{ flex: 1, backgroundColor: '#e65100' }}
+                    >
+                      🔥 Approve Burn
+                      {loading && <span className="loading"></span>}
+                    </button>
+                    <button
+                      className="button secondary"
+                      onClick={() => {
+                        alert('Reject burn functionality coming soon!');
+                      }}
+                      disabled={loading}
+                      style={{ flex: 1 }}
+                    >
+                      ❌ Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Token Balance & Holdings - Show whenever wallet is connected */}
+      {wallet && (
+        <div className="card">
+          <h2>5. Your Token Holdings</h2>
           <div className="info-box">
             <h3>Total Balance</h3>
             <p><strong>{tokenBalance} tokens</strong></p>
 
-            {balanceBreakdown.length > 0 && (
+            {balanceBreakdown.length > 0 ? (
               <div style={{ marginTop: '1rem', borderTop: '1px solid #e0e0e0', paddingTop: '1rem' }}>
                 <h4 style={{ fontSize: '0.9em', marginBottom: '0.5rem', color: '#666' }}>Breakdown by Token:</h4>
                 {balanceBreakdown.map((item, index) => (
                   <div key={item.instrumentId} style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    padding: '0.5rem 0',
+                    padding: '0.75rem 0',
                     borderBottom: index < balanceBreakdown.length - 1 ? '1px solid #f0f0f0' : 'none'
                   }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '1em', fontWeight: '500', color: '#333' }}>
-                        {item.name} ({item.symbol})
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '1em', fontWeight: '500', color: '#333' }}>
+                          {item.name} ({item.symbol})
+                        </div>
+                        <code style={{ fontSize: '0.75em', color: '#999' }}>
+                          {item.instrumentId.substring(0, 20)}...
+                        </code>
                       </div>
-                      <code style={{ fontSize: '0.75em', color: '#999' }}>
-                        {item.instrumentId.substring(0, 20)}...
-                      </code>
+                      <div style={{ textAlign: 'right', marginLeft: '1rem' }}>
+                        <div style={{ fontWeight: 'bold', fontSize: '1.1em' }}>
+                          {item.amount} {item.symbol}
+                        </div>
+                        <div style={{ fontSize: '0.75em', color: '#666' }}>
+                          {item.count} holding{item.count !== 1 ? 's' : ''}
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ textAlign: 'right', marginLeft: '1rem' }}>
-                      <div style={{ fontWeight: 'bold', fontSize: '1.1em' }}>
-                        {item.amount} {item.symbol}
-                      </div>
-                      <div style={{ fontSize: '0.75em', color: '#666' }}>
-                        {item.count} holding{item.count !== 1 ? 's' : ''}
-                      </div>
+                    {/* Individual holdings with burn buttons */}
+                    <div style={{ marginLeft: '1rem', marginTop: '0.5rem', fontSize: '0.85em' }}>
+                      {/* <div style={{ fontSize: '0.8em', color: '#999', marginBottom: '0.25rem' }}>
+                        DEBUG: holdings={item.holdings ? item.holdings.length : 'undefined'}
+                      </div> */}
+                      {item.holdings && item.holdings.length > 0 ? (
+                        item.holdings.map((holding, hIndex) => (
+                          <div key={holding.contractId} style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '0.25rem 0',
+                            color: '#666'
+                          }}>
+                            <div style={{ flex: 1 }}>
+                              <code style={{ fontSize: '0.9em' }}>
+                                {holding.contractId.substring(0, 15)}...
+                              </code>
+                              <span style={{ marginLeft: '0.5rem' }}>
+                                {holding.amount} {item.symbol}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                              {/* <button
+                                onClick={() => transferToAdmin(holding.contractId, holding.amount, item.symbol)}
+                                disabled={loading}
+                                style={{
+                                  padding: '0.25rem 0.5rem',
+                                  fontSize: '0.75em',
+                                  backgroundColor: '#4ecdc4',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: loading ? 'not-allowed' : 'pointer',
+                                  opacity: loading ? 0.5 : 1
+                                }}
+                              >
+                                ↩️ Transfer
+                              </button> */}
+                              <button
+                                onClick={() => burnHolding(holding.contractId, holding.amount, item.symbol)}
+                                disabled={loading}
+                                style={{
+                                  padding: '0.25rem 0.5rem',
+                                  fontSize: '0.75em',
+                                  backgroundColor: '#ff6b6b',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: loading ? 'not-allowed' : 'pointer',
+                                  opacity: loading ? 0.5 : 1
+                                }}
+                              >
+                                🔥 Burn
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ color: '#999', fontSize: '0.8em' }}>
+                          No individual holdings data available
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
+            ) : (
+              <p style={{ marginTop: '0.5rem', color: '#666', fontSize: '0.9em' }}>
+                No holdings yet. Create a token and mint some!
+              </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Token Minting - Two Step Flow */}
+      {createdToken && (
+        <div className="card">
+          <h2>6. Mint Tokens (Two-Step Flow)</h2>
+          <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#e3f2fd', borderRadius: '4px', borderLeft: '4px solid #2196F3' }}>
+            <strong>Minting for:</strong> {createdToken.symbol} - {createdToken.name}
           </div>
 
           {/* Step 1: Issue */}
@@ -1010,7 +1298,7 @@ participants.app_user.ledger_api.users.rights.grant(
             onClick={issueTokens}
             disabled={loading || pendingProposal !== null}
           >
-            Step 1: Issue {mintAmount} {tokenSymbol} (Create Proposal)
+            Step 1: Issue {mintAmount} {createdToken.symbol} (Create Proposal)
             {loading && <span className="loading"></span>}
           </button>
 
@@ -1018,7 +1306,7 @@ participants.app_user.ledger_api.users.rights.grant(
           {pendingProposal && (
             <div className="info-box" style={{ marginTop: '1rem', backgroundColor: '#fff3cd' }}>
               <h3>⏳ Pending Proposal</h3>
-              <p>Amount: <strong>{pendingProposal.amount} {tokenSymbol}</strong></p>
+              <p>Amount: <strong>{pendingProposal.amount} {createdToken.symbol}</strong></p>
               <p>Proposal ID: <code>{pendingProposal.proposalId.substring(0, 30)}...</code></p>
               <button
                 className="button primary"

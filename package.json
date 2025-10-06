@@ -10,8 +10,8 @@
     "daml:build": "node scripts/daml-build.js",
     "server:dev": "nodemon --watch server --ext js --exec node server/index.js",
     "server:start": "bash -c 'echo \"🔄 Checking for existing processes on port 8899...\"; lsof -ti :8899 -sTCP:LISTEN -n -P | xargs -I{} kill -9 {} 2>/dev/null || true; pkill -f \"server/index.js\" 2>/dev/null || true; pkill -f \"nodemon --watch server\" 2>/dev/null || true; echo \"✅ Port 8899 cleared, starting server...\"; node server/index.js'",
-    "server:start:robust": "node scripts/start-server.js",
-    "server:stop": "bash -lc 'lsof -ti :8899 -sTCP:LISTEN -n -P | xargs -I{} kill -9 {} 2>/dev/null || true; pkill -f \"server/index.js\" || true; pkill -f \"nodemon --watch server\" || true'"
+    "server:stop": "bash -lc 'lsof -ti :8899 -sTCP:LISTEN -n -P | xargs -I{} kill -9 {} 2>/dev/null || true; pkill -f \"server/index.js\" || true; pkill -f \"nodemon --watch server\" || true'",
+    "server:restart": "npm run server:stop && npm run server:start"
   },
   "keywords": [],
   "author": "",

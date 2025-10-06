@@ -96,6 +96,118 @@ participants.app_user.ledger_api.users.rights.grant(
 
 See [CONTEXT.md](./CONTEXT.md) for detailed troubleshooting.
 
+## Uploading DARs to Canton
+
+**CRITICAL**: Use this proven method to upload new DAR versions to Canton participants.
+
+### Method: grpcurl via Python Script
+
+Create a Python script like `/tmp/upload_dar_v2.2.0.py`:
+
+```python
+import subprocess
+import base64
+import json
+
+# Read DAR file
+dar_path = '/path/to/your/minimal-token-autoaccept-X.Y.Z.dar'
+with open(dar_path, 'rb') as f:
+    dar_bytes = f.read()
+
+# Encode to base64 for JSON
+dar_b64 = base64.b64encode(dar_bytes).decode('utf-8')
+
+# Create upload request
+upload_request = {
+    "dars": [
+        {
+            "bytes": dar_b64,
+            "description": "MinimalToken vX.Y.Z - Description of changes"
+        }
+    ],
+    "vet_all_packages": True,
+    "synchronize_vetting": True
+}
+
+json_data = json.dumps(upload_request)
+
+# Upload to app-provider (port 3902)
+print("📦 Uploading DAR to app-provider...")
+result = subprocess.run([
+    'grpcurl', '-plaintext',
+    '-d', json_data,
+    'localhost:3902',
+    'com.digitalasset.canton.admin.participant.v30.PackageService/UploadDar'
+], capture_output=True, text=True)
+
+if result.returncode == 0:
+    print("✅ app-provider:", result.stdout.strip())
+else:
+    print("❌ app-provider error:", result.stderr.strip())
+    exit(1)
+
+# Upload to app-user (port 2902)
+print("\n📦 Uploading DAR to app-user...")
+result2 = subprocess.run([
+    'grpcurl', '-plaintext',
+    '-d', json_data,
+    'localhost:2902',
+    'com.digitalasset.canton.admin.participant.v30.PackageService/UploadDar'
+], capture_output=True, text=True)
+
+if result2.returncode == 0:
+    print("✅ app-user:", result2.stdout.strip())
+else:
+    print("❌ app-user error:", result2.stderr.strip())
+    exit(1)
+
+print("\n✅ Upload complete!")
+```
+
+Then run:
+```bash
+python3 /tmp/upload_dar_v2.2.0.py
+```
+
+**Expected Output**:
+```
+📦 Uploading DAR to app-provider...
+✅ app-provider: {
+  "darIds": [
+    "c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae"
+  ]
+}
+
+📦 Uploading DAR to app-user...
+✅ app-user: {
+  "darIds": [
+    "c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae"
+  ]
+}
+
+✅ Upload complete!
+```
+
+### After Upload
+
+Update `src/services/cnQuickstartLedgerService.js` with the new package ID:
+
+```javascript
+this.minimalTokenPackageId = 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae';
+```
+
+**Why This Method Works**:
+- ✅ Uses grpcurl with Canton's PackageService gRPC API
+- ✅ No Python protobuf dependencies required
+- ✅ Direct participant upload (ports 3902, 2902)
+- ✅ Proper vetting and synchronization
+- ✅ Returns package IDs for verification
+
+**Methods That DON'T Work**:
+- ❌ `daml ledger upload-dar` (authentication errors)
+- ❌ Python gRPC with Canton protobufs (missing modules)
+- ❌ Canton console via piped commands (participant name issues)
+
 ## Architecture
 
 ### DAML Integration Architecture
@@ -109,8 +221,9 @@ See [CONTEXT.md](./CONTEXT.md) for detailed troubleshooting.
 ### Tech Stack
 - **Frontend**: React 19.1.1 + Vite 7.1.5
 - **Backend**: Fastify server (port 8899)
-- **DAML**: MinimalToken v2.1.0 contracts
+- **DAML**: MinimalToken v2.2.0 contracts (with Burn choice)
 - **Canton**: LocalNet from cn-quickstart
+- **Package ID (v2.2.0)**: `c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae`
 - **Package ID (v2.1.0)**: `c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`
 - **Package ID (v2.0.1)**: `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118`
 - **Package ID (v2.0.0)**: `eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de`
@@ -148,7 +261,7 @@ This demo performs **actual DAML operations** on Canton ledger:
    - Query HoldingProposals by owner
    - Query Instruments by admin
 
-### DAML Contract Flow (MinimalToken v2.1.0)
+### DAML Contract Flow (MinimalToken v2.2.0)
 
 ```
 Instrument (signatory: admin)
@@ -156,6 +269,8 @@ Instrument (signatory: admin)
 HoldingProposal (signatory: admin, observer: owner)
   ↓ Accept choice (controller: owner)
 Holding (signatory: admin, owner)  ← Both sign (DAML Finance pattern)
+  ↓ Burn choice (controller: owner)
+Archived ← Reduces supply
 ```
 
 **Key Design Decisions:**
@@ -163,6 +278,7 @@ Holding (signatory: admin, owner)  ← Both sign (DAML Finance pattern)
 2. **Combined Authority**: When owner exercises Accept, they gain combined authority from proposal signatory
 3. **Cross-Participant**: Works because Accept choice gives owner signing rights
 4. **ACS Visibility**: Both signatories ensure Holdings appear in owner's ACS queries
+5. **Burn Choice**: Owner can burn tokens (archives Holding contract), both parties sign via signatories
 
 ### Verified Test Case (2025-10-06)
 - Token: USA Token (symbol: USA)

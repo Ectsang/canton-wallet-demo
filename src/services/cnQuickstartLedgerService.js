@@ -20,8 +20,8 @@ class CNQuickstartLedgerService {
     this.ledgerId = this.participantId;
 
     // MinimalToken package ID from DAR manifest
-    // Using minimal-token-autoaccept v2.1.0 package with both signatories pattern (Holding: signatory admin, owner)
-    this.minimalTokenPackageId = 'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d';
+    // Using minimal-token-autoaccept v2.4.0 package with ProposeBurn/AcceptBurn pattern
+    this.minimalTokenPackageId = 'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de';
 
     // App Provider party from LocalNet (PARTY_HINT=quickstart-e-1)
     // This is the party with admin rights on App Provider participant
@@ -500,6 +500,446 @@ class CNQuickstartLedgerService {
   }
 
   /**
+   * Propose to burn a Holding contract (cross-participant pattern)
+   * Owner exercises ProposeBurn choice on Holding to create BurnProposal
+   *
+   * @param {string} holdingId - Holding contract ID to propose burning
+   * @param {string} owner - Party ID of the owner (controller of ProposeBurn choice)
+   * @returns {Promise<Object>} { success, proposalId, holdingId, owner }
+   */
+  async proposeBurnHolding({ holdingId, owner }) {
+    try {
+      await this.initialize();
+
+      console.log('🔥 Proposing burn via ProposeBurn choice...', {
+        holdingId,
+        owner
+      });
+
+      const holdingTemplateId = `${this.minimalTokenPackageId}:MinimalToken:Holding`;
+      const commandId = `propose-burn-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+      // Determine which participant the owner is on and use their JSON API
+      const isAppProviderParty = owner.startsWith('app_provider');
+      const apiUrl = isAppProviderParty
+        ? 'http://localhost:3975'  // app-provider JSON API
+        : 'http://localhost:2975'; // app-user JSON API (for demo-wallet-X)
+
+      console.log(`📍 Using ${isAppProviderParty ? 'app-provider' : 'app-user'} JSON API for owner: ${owner}`);
+
+      // Generate JWT: actAs owner (controller of ProposeBurn)
+      const token = this.generateJWT([owner], []);
+
+      const exerciseCommand = {
+        templateId: holdingTemplateId,
+        contractId: holdingId,
+        choice: 'ProposeBurn',
+        choiceArgument: {}  // ProposeBurn choice takes no arguments
+      };
+
+      const requestBody = {
+        commands: {
+          applicationId: "canton-wallet-demo",
+          commandId: commandId,
+          actAs: [owner],
+          readAs: [],
+          commands: [{
+            ExerciseCommand: exerciseCommand
+          }]
+        }
+      };
+
+      console.log('📋 Exercise ProposeBurn command:', JSON.stringify(requestBody, null, 2));
+
+      const response = await this.fetchWithTimeout(
+        `${apiUrl}/v2/commands/submit-and-wait-for-transaction`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(requestBody)
+        },
+        30000
+      );
+
+      const responseText = await response.text();
+      console.log('📥 Raw ProposeBurn response:', responseText);
+      console.log('📥 Response status:', response.status);
+
+      const result = JSON.parse(responseText);
+      console.log('📥 ProposeBurn command response:', JSON.stringify(result, null, 2));
+
+      // Extract BurnProposal contract ID from created events
+      if (result?.transaction?.events) {
+        const createdEvent = result.transaction.events.find(e => e.CreatedEvent);
+        if (createdEvent) {
+          const proposalId = createdEvent.CreatedEvent.contractId;
+          console.log('✅ BurnProposal created:', proposalId);
+
+          return {
+            success: true,
+            proposalId,
+            holdingId,
+            owner,
+            transactionId: result.transaction.updateId || result.transaction.commandId,
+            proposedAt: new Date().toISOString()
+          };
+        }
+      }
+
+      throw new Error('ProposeBurn succeeded but could not extract proposalId from response');
+
+    } catch (error) {
+      console.error('❌ Failed to propose burn:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Burn a Holding contract (reduce supply) - LEGACY METHOD
+   * Owner exercises the Burn choice on Holding
+   * NOTE: This may not work for cross-participant Holdings with dual signatories.
+   * Use proposeBurnHolding() + acceptBurnProposal() for cross-participant burns.
+   *
+   * @param {string} holdingId - Holding contract ID to burn
+   * @param {string} owner - Party ID of the owner (must be authorized to burn)
+   */
+  async burnHolding({ holdingId, owner }) {
+    try {
+      await this.initialize();
+
+      console.log('🔥 Burning holding via JSON Ledger API v2...', {
+        holdingId,
+        owner
+      });
+
+      const holdingTemplateId = `${this.minimalTokenPackageId}:MinimalToken:Holding`;
+      const commandId = `burn-holding-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+      // Determine which participant the owner is on and use their JSON API
+      const isAppProviderParty = owner.startsWith('app_provider');
+      const apiUrl = isAppProviderParty
+        ? 'http://localhost:3975'  // app-provider JSON API
+        : 'http://localhost:2975'; // app-user JSON API (for demo-wallet-X)
+
+      console.log(`📍 Using ${isAppProviderParty ? 'app-provider' : 'app-user'} JSON API for owner: ${owner}`);
+
+      // Generate JWT: actAs owner (controller) only
+      // NOTE: readAs admin doesn't work for cross-participant burns
+      const token = this.generateJWT([owner], []);
+
+      const exerciseCommand = {
+        templateId: holdingTemplateId,
+        contractId: holdingId,
+        choice: 'Burn',
+        choiceArgument: {}  // Burn choice takes no arguments
+      };
+
+      const requestBody = {
+        commands: {
+          applicationId: "canton-wallet-demo",
+          commandId: commandId,
+          actAs: [owner],  // Only controller acts
+          readAs: [],      // No readAs for cross-participant operations
+          commands: [{
+            ExerciseCommand: exerciseCommand
+          }]
+        }
+      };
+
+      console.log('📋 Exercise Burn command:', JSON.stringify(requestBody, null, 2));
+
+      const response = await this.fetchWithTimeout(
+        `${apiUrl}/v2/commands/submit-and-wait-for-transaction`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(requestBody)
+        },
+        30000  // 30 second timeout for command submission
+      );
+
+      // Log raw response for debugging
+      const responseText = await response.text();
+      console.log('📥 Raw Burn response:', responseText);
+      console.log('📥 Response status:', response.status);
+
+      const result = JSON.parse(responseText);
+
+      console.log('📥 Burn command response:', JSON.stringify(result, null, 2));
+
+      // Check if transaction was successful
+      if (result?.transaction) {
+        console.log('✅ Burn transaction successful!');
+        console.log('📋 Transaction ID:', result.transaction.updateId || result.transaction.commandId);
+
+        // Burn archives the contract - check for ArchivedEvent
+        if (result.transaction.events && result.transaction.events.length > 0) {
+          console.log(`🔍 Found ${result.transaction.events.length} events in burn response`);
+          const archivedEvent = result.transaction.events.find(e => e.ArchivedEvent);
+          if (archivedEvent) {
+            console.log('✅ Archived contract ID:', archivedEvent.ArchivedEvent.contractId);
+          }
+        } else {
+          console.log('ℹ️ No events in response (Burn returns (), which is expected)');
+        }
+
+        return {
+          success: true,
+          holdingId: holdingId,
+          owner: owner,
+          transactionId: result.transaction.updateId || result.transaction.commandId,
+          burnedAt: new Date().toISOString()
+        };
+      }
+
+      throw new Error('Burn transaction failed - no transaction in response');
+
+    } catch (error) {
+      console.error('❌ Failed to burn holding:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Accept a BurnProposal (admin exercises AcceptBurn choice)
+   * This completes the cross-participant burn by archiving the underlying Holding
+   *
+   * @param {string} proposalId - BurnProposal contract ID to accept
+   * @param {string} admin - Party ID of the admin (controller of AcceptBurn choice)
+   * @returns {Promise<Object>} { success, proposalId, admin, transactionId, acceptedAt }
+   */
+  async acceptBurnProposal({ proposalId, admin }) {
+    try {
+      await this.initialize();
+
+      console.log('✅ Accepting burn proposal via AcceptBurn choice...', {
+        proposalId,
+        admin
+      });
+
+      const burnProposalTemplateId = `${this.minimalTokenPackageId}:MinimalToken:BurnProposal`;
+      const commandId = `accept-burn-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+      // Determine which participant the admin is on and use their JSON API
+      const isAppProviderParty = admin.startsWith('app_provider');
+      const apiUrl = isAppProviderParty
+        ? 'http://localhost:3975'  // app-provider JSON API
+        : 'http://localhost:2975'; // app-user JSON API
+
+      console.log(`📍 Using ${isAppProviderParty ? 'app-provider' : 'app-user'} JSON API for admin: ${admin}`);
+
+      // Generate JWT: actAs admin (controller of AcceptBurn)
+      const token = this.generateJWT([admin], []);
+
+      const exerciseCommand = {
+        templateId: burnProposalTemplateId,
+        contractId: proposalId,
+        choice: 'AcceptBurn',
+        choiceArgument: {}  // AcceptBurn choice takes no arguments
+      };
+
+      const requestBody = {
+        commands: {
+          applicationId: "canton-wallet-demo",
+          commandId: commandId,
+          actAs: [admin],
+          readAs: [],
+          commands: [{
+            ExerciseCommand: exerciseCommand
+          }]
+        }
+      };
+
+      console.log('📋 Exercise AcceptBurn command:', JSON.stringify(requestBody, null, 2));
+
+      const response = await this.fetchWithTimeout(
+        `${apiUrl}/v2/commands/submit-and-wait-for-transaction`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(requestBody)
+        },
+        30000
+      );
+
+      const responseText = await response.text();
+      console.log('📥 Raw AcceptBurn response:', responseText);
+      console.log('📥 Response status:', response.status);
+
+      const result = JSON.parse(responseText);
+      console.log('📥 AcceptBurn command response:', JSON.stringify(result, null, 2));
+
+      // Check if transaction was successful
+      if (result?.transaction) {
+        console.log('✅ AcceptBurn transaction successful!');
+        console.log('📋 Transaction ID:', result.transaction.updateId || result.transaction.commandId);
+
+        // AcceptBurn archives both the BurnProposal and the underlying Holding
+        if (result.transaction.events && result.transaction.events.length > 0) {
+          console.log(`🔍 Found ${result.transaction.events.length} events in AcceptBurn response`);
+          const archivedEvents = result.transaction.events.filter(e => e.ArchivedEvent);
+          console.log(`✅ Archived ${archivedEvents.length} contracts (BurnProposal + Holding)`);
+        }
+
+        return {
+          success: true,
+          proposalId,
+          admin,
+          transactionId: result.transaction.updateId || result.transaction.commandId,
+          acceptedAt: new Date().toISOString()
+        };
+      }
+
+      throw new Error('AcceptBurn transaction failed - no transaction in response');
+
+    } catch (error) {
+      console.error('❌ Failed to accept burn proposal:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Transfer holding by exercising Transfer choice
+   *
+   * @param {Object} params - Transfer parameters
+   * @param {string} params.holdingId - Holding contract ID
+   * @param {string} params.owner - Owner party ID (controller)
+   * @param {string} params.recipient - Recipient party ID
+   * @param {string} params.amount - Amount to transfer
+   * @returns {Promise<Object>} Transfer result with new holding IDs
+   */
+  async transferHolding({ holdingId, owner, recipient, amount }) {
+    try {
+      await this.initialize();
+
+      console.log('🔄 Transferring holding...', { holdingId, owner, recipient, amount });
+
+      // Determine which participant the owner is on and use their JSON API
+      const isAppProviderParty = owner.startsWith('app_provider');
+      const apiUrl = isAppProviderParty
+        ? 'http://localhost:3975'  // app-provider JSON API
+        : 'http://localhost:2975'; // app-user JSON API (for demo-wallet-X)
+
+      console.log(`📍 Using ${isAppProviderParty ? 'app-provider' : 'app-user'} JSON API for owner: ${owner}`);
+
+      // Generate JWT: actAs owner (controller) only
+      // NOTE: readAs admin doesn't work for cross-participant transfers
+      const token = this.generateJWT([owner], []);
+
+      // Create Transfer exercise command
+      const exerciseCommand = {
+        templateId: `${this.minimalTokenPackageId}:MinimalToken:Holding`,
+        contractId: holdingId,
+        choice: 'Transfer',
+        choiceArgument: {
+          recipient: recipient,
+          transferAmount: amount
+        }
+      };
+
+      const commandId = `transfer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      const requestBody = {
+        commands: {
+          applicationId: "canton-wallet-demo",
+          commandId: commandId,
+          actAs: [owner],  // Only controller acts
+          readAs: [],      // No readAs for cross-participant operations
+          commands: [{
+            ExerciseCommand: exerciseCommand
+          }]
+        }
+      };
+
+      console.log('📋 Exercise Transfer command:', JSON.stringify(requestBody, null, 2));
+
+      const response = await this.fetchWithTimeout(
+        `${apiUrl}/v2/commands/submit-and-wait-for-transaction`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(requestBody)
+        },
+        30000
+      );
+
+      const responseText = await response.text();
+      console.log('📥 Raw Transfer response:', responseText);
+      console.log('📥 Response status:', response.status);
+
+      const result = JSON.parse(responseText);
+
+      console.log('📥 Transfer command response:', JSON.stringify(result, null, 2));
+
+      if (result?.transaction) {
+        console.log('✅ Transfer transaction successful!');
+        console.log('📋 Transaction ID:', result.transaction.updateId || result.transaction.commandId);
+
+        // Extract created holding IDs from events
+        let newHoldingId = null;
+        let changeHoldingId = null;
+
+        if (result.transaction.events && result.transaction.events.length > 0) {
+          console.log(`🔍 Found ${result.transaction.events.length} events in transfer response`);
+
+          const createdEvents = result.transaction.events.filter(e => e.CreatedEvent);
+          console.log(`🔍 Found ${createdEvents.length} created events`);
+
+          // First created event is the new holding (recipient)
+          if (createdEvents[0]) {
+            newHoldingId = createdEvents[0].CreatedEvent.contractId;
+            console.log('✅ New holding (recipient):', newHoldingId);
+          }
+
+          // Second created event is the change holding (sender), if any
+          if (createdEvents[1]) {
+            changeHoldingId = createdEvents[1].CreatedEvent.contractId;
+            console.log('✅ Change holding (sender):', changeHoldingId);
+          }
+        }
+
+        return {
+          success: true,
+          holdingId: holdingId,
+          owner: owner,
+          recipient: recipient,
+          amount: parseFloat(amount),
+          newHoldingId: newHoldingId,
+          changeHoldingId: changeHoldingId,
+          transactionId: result.transaction.updateId || result.transaction.commandId,
+          transferredAt: new Date().toISOString()
+        };
+      }
+
+      throw new Error('Transfer transaction failed - no transaction in response');
+
+    } catch (error) {
+      console.error('❌ Failed to transfer holding:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Query holdings using /v2/state/active-contracts endpoint
    * Observer access: admin is actAs, owner is readAs
    *
@@ -516,10 +956,14 @@ class CNQuickstartLedgerService {
       // v2.0.0: eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de
       // v2.0.1: 2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118
       // v2.1.0: c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d
+      // v2.2.0: c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae
+      // v2.4.0: bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de
       const allPackageIds = [
-        'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d', // v2.1.0 (current)
-        '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118', // v2.0.1
-        'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'  // v2.0.0
+        'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de', // v2.4.0 (current - with ProposeBurn/AcceptBurn)
+        // 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae', // v2.2.0 (with Burn)
+        // 'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d', // v2.1.0
+        // '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118', // v2.0.1
+        // 'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'  // v2.0.0
       ];
 
       const holdingTemplateIds = allPackageIds.map(pkgId => `${pkgId}:MinimalToken:Holding`);

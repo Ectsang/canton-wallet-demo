@@ -51,7 +51,7 @@ template Holding
     instrument : ContractId Instrument
     amount     : Decimal
   where
-    signatory admin, owner  -- Both parties sign (DAML Finance standard pattern)
+    signatory admin, owner  -- Both parties sign (required for cross-participant holdings)
 
     -- Transfer part or all of the holding; consumes self and
     -- returns new recipient holding and optional change for sender
@@ -78,3 +78,42 @@ template Holding
           return (newCid, Some changeCid)
         else
           return (newCid, None)
+
+    -- Legacy: Direct burn (may not work cross-participant with dual signatories)
+    choice Burn : ()
+      controller owner
+      do
+        archive self
+        return ()
+
+    -- Propose to burn tokens (cross-participant pattern - RECOMMENDED)
+    choice ProposeBurn : ContractId BurnProposal
+      controller owner
+      do
+        create BurnProposal with
+          admin
+          owner
+          holding = self
+
+-- BurnProposal: Proposal to burn a Holding (for cross-participant burns)
+template BurnProposal
+  with
+    admin   : Party
+    owner   : Party
+    holding : ContractId Holding
+  where
+    signatory owner
+    observer admin
+
+    -- Admin accepts burn proposal → archives the Holding
+    choice AcceptBurn : ()
+      controller admin
+      do
+        exercise holding Archive
+        return ()
+
+    -- Owner rejects/cancels burn proposal
+    choice RejectBurn : ()
+      controller owner
+      do
+        return ()

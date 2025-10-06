@@ -19,9 +19,11 @@ class JsonApiV1Service {
 
     // All deployed package IDs for MinimalToken
     this.packageIds = [
-      'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d',  // v2.1.0
-      '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118',  // v2.0.1
-      'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'   // v2.0.0
+      'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de',  // v2.4.0 (with ProposeBurn/AcceptBurn)
+      // 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae',  // v2.2.0 (with Burn) - for old Instruments
+      // 'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d',  // v2.1.0
+      // '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118',  // v2.0.1
+      // 'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'   // v2.0.0
     ];
   }
 
@@ -254,6 +256,70 @@ class JsonApiV1Service {
 
     } catch (error) {
       console.error('❌ Failed to query proposals via JSON API v1:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Query BurnProposals for a specific owner or admin
+   *
+   * @param {string} party - Party ID (owner can see their proposals, admin can see all proposals as observer)
+   * @returns {Promise<Object>} { success, proposals }
+   */
+  async queryBurnProposals(party) {
+    try {
+      console.log('🔄 Querying BurnProposals via JSON API v1...', { party });
+
+      const token = this.generateJWT(party);
+
+      // Create templateIds for all package versions
+      const templateIds = this.packageIds.map(pkgId =>
+        `${pkgId}:MinimalToken:BurnProposal`
+      );
+
+      // Query app-user participant (where owner creates BurnProposals)
+      const appUserUrl = 'http://localhost:2975';
+      console.log(`📍 Querying BurnProposals on app-user participant: ${appUserUrl}`);
+
+      const response = await fetch(`${appUserUrl}/v1/query`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          templateIds
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`JSON API v1 query failed: ${response.status} ${errorText}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.result) {
+        throw new Error('Unexpected response format: missing result field');
+      }
+
+      const proposals = data.result.map(contract => ({
+        proposalId: contract.contractId,
+        owner: contract.payload.owner,
+        admin: contract.payload.admin,
+        holding: contract.payload.holding
+      }));
+
+      console.log(`✅ Found ${proposals.length} BurnProposals on app-user participant`);
+      console.log('📋 BurnProposal IDs:', proposals.map(p => p.proposalId));
+
+      return {
+        success: true,
+        proposals
+      };
+
+    } catch (error) {
+      console.error('❌ Failed to query burn proposals via JSON API v1:', error);
       throw error;
     }
   }
