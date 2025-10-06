@@ -431,3 +431,54 @@ curl http://localhost:8899/api/cn/balance/demo-wallet-1::12203bef...
 
 **Status: RESOLVED ✅**
 
+## End-to-End Flow Verification - 2025-10-06
+
+### Complete Two-Step Minting Flow Confirmed Working ✅
+
+After thorough testing with USA Token, the complete flow has been verified:
+
+**Test Case: USA Token**
+- Instrument Contract ID: `00ba1b7a188d63ba179e1b9660c6cf6cbf44f060ae94fdd6b21875d85239462d5bca1112201dc74f474e508b7f410b788627f74ba7ce8105759743fc881c2d3217aa1c602c`
+- Owner: `demo-wallet-1::12203bef03ef28882157f215f074792d8b02a1881cd3e0c0bd505150f67a8712ea21`
+- Amount: 1000 USA tokens
+
+**Timeline:**
+1. **17:23:44** - Instrument created (USA Token, symbol: USA, decimals: 2) ✅
+2. **17:24:37** - Issue choice executed → **HoldingProposal created** ✅
+   - Template: `MinimalToken:HoldingProposal`
+   - Signatory: `app_provider` (admin)
+   - Observer: `demo-wallet-1` (owner)
+3. **17:24:40** - Accept choice executed → **Holding created** ✅
+   - Template: `MinimalToken:Holding`
+   - Signatories: Both `app_provider` AND `demo-wallet-1` (DAML Finance pattern)
+   - Balance updated with 1000 USA tokens
+
+**Confirmed Behavior:**
+- ✅ Issue creates **only** HoldingProposal (not Holding)
+- ✅ Balance does **not** update after Issue step
+- ✅ Accept converts HoldingProposal → Holding
+- ✅ Balance updates **only** after Accept step
+- ✅ Cross-participant operations working correctly
+- ✅ JWT authorization with actAs/readAs rights working
+- ✅ v2.1.0 DAML contract with both signatories pattern working
+- ✅ v1 JSON API balance queries returning correct results
+
+**Frontend Features Working:**
+1. ✅ Token selector dropdown (Section 3)
+2. ✅ Pending proposals display (Section 4)
+3. ✅ Accept proposal functionality
+4. ✅ Balance breakdown by instrument with token symbols
+5. ✅ Multi-token support (DEMO, TEST, TCRS, TC2.1, USA all visible)
+6. ✅ Clear Wallet and Clear Tokens functionality
+7. ✅ Canton console onboarding instructions
+
+**Architecture Confirmed:**
+- Package v2.1.0 (`c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`)
+- Holding template: `signatory admin, owner` (both signatories)
+- HoldingProposal template: `signatory admin, observer owner`
+- JSON API v1 for queries, v2 for commands
+- JWT with `scope: 'daml_ledger_api'` for v1 API
+- Full templateId format: `packageId:module:entity`
+
+**All Systems Operational ✅**
+

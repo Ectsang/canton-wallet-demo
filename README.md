@@ -2,14 +2,19 @@
 
 A web application demonstrating **real DAML contract operations** on Canton Network LocalNet. This demo creates actual Instrument and Holding contracts on the Canton ledger using JSON Ledger API with JWT authentication.
 
+**✅ FULLY OPERATIONAL** - End-to-end two-step minting flow verified working (2025-10-06)
+
 ## Features
 
-- **Real DAML Integration**: Creates actual contracts on Canton ledger via JSON Ledger API
+- **Real DAML Integration**: Creates actual contracts on Canton ledger via JSON Ledger API v1/v2
 - **Cross-Participant Minting**: Issue and Accept tokens across different participants
-- **External Wallet Creation**: Generate parties with proper JWT authorization
-- **Custom Token Deployment**: Deploy MinimalToken DAML contracts (v2.0.1 with observer pattern)
-- **Two-Step Minting**: Issue (creates HoldingProposal) + Accept (creates Holding) flow
-- **Balance Queries**: Query actual Active Contract Set (ACS) for real balances
+- **Two-Step Minting Flow**:
+  - Step 1: Issue choice creates HoldingProposal (proposal to mint)
+  - Step 2: Accept choice creates Holding (actual token balance)
+- **Multi-Token Support**: Create and manage multiple token types with dropdown selector
+- **Balance Queries**: Real-time balance display with breakdown by token symbol
+- **Proposal Management**: View and accept pending HoldingProposals
+- **Party Management**: Canton console integration for wallet setup with actAs/readAs rights
 
 ## Prerequisites
 
@@ -51,13 +56,25 @@ npm run dev
 
 ## Usage
 
-### Basic Flow
+### Quick Start
 
-1. **Initialize**: The app automatically connects to Canton Network JSON API
-2. **Create Token**: Configure token parameters (name, symbol, decimals) - creates Instrument contract
-3. **Issue Tokens**: Specify owner party and amount - creates HoldingProposal contract
-4. **Accept Proposal**: Owner exercises Accept choice - creates Holding contract
-5. **View Balance**: Query actual holdings from Canton ledger
+1. **Initialize**: App automatically connects to Canton Network (localhost:3975)
+2. **Setup Wallet**:
+   - Use existing party ID (e.g., `demo-wallet-1::1220...`)
+   - Or create new party via Canton console (see Onboarding section)
+3. **Create Token**: Name, symbol, decimals → Creates Instrument contract
+4. **Issue Tokens** (Step 1/2): Select token, enter amount → Creates HoldingProposal
+5. **Accept Proposal** (Step 2/2): Click Accept in Section 4 → Creates Holding
+6. **View Balance**: Real-time balance with breakdown by token symbol
+
+### UI Sections
+
+1. **Connection Status**: Shows Canton Network connectivity
+2. **Wallet Management**: Create/use external wallet, view party ID
+3. **Token Creation**: Create new tokens or select from existing
+4. **Pending Proposals**: View and accept HoldingProposals
+5. **Minting**: Issue tokens (creates proposals)
+6. **Balance Display**: Current balance breakdown by token
 
 ### Cross-Participant Setup
 
@@ -81,21 +98,22 @@ See [CONTEXT.md](./CONTEXT.md) for detailed troubleshooting.
 
 ## Architecture
 
-### Real DAML Integration
-- **CNQuickstartLedgerService**: Direct JSON Ledger API v2 integration
-- **JWT Authentication**: HMAC-SHA256 signed tokens with actAs/readAs claims
-- **Real Contracts**: Creates actual Instrument, HoldingProposal, and Holding contracts
-- **Observer Pattern**: Admin as signatory, owner as observer for cross-participant operations
-- **Ledger Queries**: Queries real Active Contract Set (ACS) via JSON API
+### DAML Integration Architecture
+- **JSON Ledger API**: v2 for commands, v1 for queries
+- **JWT Authentication**: HMAC-SHA256 signed tokens with `scope: 'daml_ledger_api'`
+- **Real Contracts**: Actual Instrument, HoldingProposal, and Holding contracts on ledger
+- **DAML Finance Pattern**: Holding has both admin and owner as signatories
+- **Cross-Participant**: Admin on app-provider, owners on app-user participant
 - **No Mocks**: 100% real Canton ledger operations
 
 ### Tech Stack
 - **Frontend**: React 19.1.1 + Vite 7.1.5
-- **Backend**: Fastify server for JSON Ledger API integration
-- **DAML**: MinimalToken v2.0.1 contracts (observer pattern)
-- **Canton**: JSON Ledger API v2 with JWT authentication
-- **Package ID**: `eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de` (v2.0.0)
-- **Package ID**: `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118` (v2.0.1)
+- **Backend**: Fastify server (port 8899)
+- **DAML**: MinimalToken v2.1.0 contracts
+- **Canton**: LocalNet from cn-quickstart
+- **Package ID (v2.1.0)**: `c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`
+- **Package ID (v2.0.1)**: `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118`
+- **Package ID (v2.0.0)**: `eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de`
 
 ## Project Structure
 
@@ -119,25 +137,38 @@ canton-wallet-demo/
 
 ## Real Canton Operations
 
-This demo performs **actual DAML operations** on Canton ledger via JSON Ledger API v2:
+This demo performs **actual DAML operations** on Canton ledger:
 
-1. **Contract Creation**: `POST /v2/commands/submit-and-wait-for-transaction` with CreateCommand
-2. **Token Issuance**: Executes real `Issue` choice on Instrument → creates HoldingProposal
-3. **Proposal Accept**: Executes `Accept` choice on HoldingProposal → creates Holding
-4. **Balance Queries**: Queries real ACS with `/v2/state/active-contracts` endpoint
-5. **Cross-Participant**: Supports operations across app-provider and app-user participants
+### API Integration
+1. **Commands** (v2): `POST /v2/commands/submit-and-wait-for-transaction`
+   - CreateCommand (Instrument)
+   - ExerciseCommand (Issue, Accept)
+2. **Queries** (v1): `POST /v1/query` with templateIds
+   - Query Holdings by owner
+   - Query HoldingProposals by owner
+   - Query Instruments by admin
 
-### DAML Contract Flow (MinimalToken v2.0.1)
+### DAML Contract Flow (MinimalToken v2.1.0)
 
 ```
-Instrument (admin signatory)
-  ↓ Issue choice (admin controller)
-HoldingProposal (admin signatory, owner observer)
-  ↓ Accept choice (owner controller)
-Holding (admin signatory, owner observer)
+Instrument (signatory: admin)
+  ↓ Issue choice (controller: admin)
+HoldingProposal (signatory: admin, observer: owner)
+  ↓ Accept choice (controller: owner)
+Holding (signatory: admin, owner)  ← Both sign (DAML Finance pattern)
 ```
 
-**Key Design**: Observer pattern enables cross-participant Accept - owner can exercise choice without being signatory.
+**Key Design Decisions:**
+1. **Both Signatories**: Holding requires both admin and owner signatures (standard DAML Finance pattern)
+2. **Combined Authority**: When owner exercises Accept, they gain combined authority from proposal signatory
+3. **Cross-Participant**: Works because Accept choice gives owner signing rights
+4. **ACS Visibility**: Both signatories ensure Holdings appear in owner's ACS queries
+
+### Verified Test Case (2025-10-06)
+- Token: USA Token (symbol: USA)
+- Flow: Create Instrument → Issue (HoldingProposal) → Accept (Holding) ✅
+- Cross-participant: app-provider (admin) → app-user (demo-wallet-1) ✅
+- Balance query: Returns 1000 USA tokens ✅
 
 **No mocks, no simulations - everything is real Canton ledger data!**
 
