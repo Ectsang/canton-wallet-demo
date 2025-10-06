@@ -241,8 +241,193 @@ Debug why `daemon -c --auto-connect-local --bootstrap` mode is broken (likely Ca
    - The `daemon -c --auto-connect-local --bootstrap` approach may not be reliable
    - Consider using gRPC Admin APIs directly instead
 
+## Latest Investigation: Pattern C (Both Signatories) - 2025-10-06
+
+### Problem with Observer Pattern (v2.0.1)
+After successfully fixing cross-participant Accept with v2.0.1 observer pattern, we discovered a critical issue:
+- ✅ Holdings are created successfully
+- ❌ **Owners cannot see their Holdings in balance queries**
+
+When querying via `/v2/state/active-contracts`, Holdings with `signatory admin, observer owner` are invisible to owner queries, even though owner has actAs rights.
+
+### Root Cause Analysis
+The observer pattern (v2.0.1) works for **authorization** but breaks **visibility**:
+1. Owner can exercise Accept choice (controller authority + admin signatory from proposal)
+2. Holding is created with admin as sole signatory, owner as observer
+3. Canton ACS queries filter by stakeholder relationship
+4. **Observer status alone is insufficient for ACS visibility in cross-participant scenarios**
+
+### Research: DAML Finance Standard Pattern
+Researched DAML authorization and discovered:
+1. **Pattern A** (admin only signatory): ❌ Breaks Accept authorization
+2. **Pattern B** (owner only signatory): ❌ Breaks Accept completely (owner can't authorize admin as signatory)
+3. **Pattern C** (both signatories): ✅ **DAML Finance standard pattern**
+
+**Key Insight:** When owner exercises Accept choice, they gain **combined authority** of:
+- Owner (controller of Accept)
+- Admin (signatory of HoldingProposal)
+
+This combined authority CAN create Holding with `signatory admin, owner`.
+
+**Why Pattern C originally "failed":** The original failure was the JWT authorization issue, NOT a DAML problem!
+
+### Solution: Revert to Pattern C (v2.1.0)
+
+**File:** `daml/minimal-token/daml/MinimalToken.daml`
+```daml
+template Holding
+  with
+    admin      : Party
+    owner      : Party
+    instrument : ContractId Instrument
+    amount     : Decimal
+  where
+    signatory admin, owner  -- Both parties sign (DAML Finance standard pattern)
+```
+
+**Rationale:**
+- This is the standard DAML Finance pattern for holdings
+- Owner as signatory ensures ACS visibility
+- Combined authority from Accept choice enables cross-participant creation
+- Original failure was JWT rights, not DAML authorization
+
+### Version 2.1.0 Deployment ✅
+
+**Built and deployed:**
+```bash
+cd daml/minimal-token
+# Updated daml.yaml to version: 2.1.0
+daml build
+```
+
+**Package ID (v2.1.0):** `c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`
+
+Uploaded to both participants via `/tmp/upload_dar_v2.1.0.py`:
+- ✅ app-provider: localhost:3902
+- ✅ app-user: localhost:2902
+
+### Test Results (v2.1.0)
+
+**Test:** `/tmp/test-v2.1.0-via-api.sh`
+
+1. ✅ **Instrument Created** - Admin creates token successfully
+2. ✅ **Issue Choice** - HoldingProposal created cross-participant
+3. ✅ **Accept Choice** - Holding created with BOTH signatories!
+   ```
+   "signatories": [
+     "app_provider_quickstart-e-1::1220a57d...",
+     "demo-wallet-1::12203bef03ef..."
+   ]
+   ```
+4. ❌ **Balance Query** - Returns 0 holdings despite successful creation
+
+### ROOT CAUSE IDENTIFIED: JSON API v2 Not Working ✅
+
+**Symptom:** Holdings created successfully but ACS queries via JSON API return empty.
+
+**Investigation Results:**
+
+1. **Canton Console Verification** ✅
+   - demo-wallet-1 has **10 contracts** visible (6 HoldingProposals + 4 Holdings)
+   - Holdings include both v2.0.0 and v2.1.0 packages
+   - Party is properly **HOSTED** on app-user participant
+   - All DAML authorization working correctly
+
+2. **JSON API Testing** ❌
+   - Endpoint: `http://localhost:2975/v2/state/active-contracts`
+   - Query with templateId filter: Returns `[]`
+   - Query WITHOUT any filter (all contracts): Returns `[]`
+   - Query with different package IDs: Returns `[]`
+   - **Conclusion: JSON API endpoint returning empty regardless of query**
+
+3. **Package ID Discovery**
+   - Holdings exist with multiple package IDs:
+     - 3 Holdings: v2.0.0 (`eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de`)
+     - 1 Holding: v2.1.0 (`c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`)
+
+**Root Cause:**
+Canton Network LocalNet's JSON API v2 `/v2/state/active-contracts` endpoint is **not functional** or **not properly exposed** on port 2975. The gRPC API (used by Canton console) works perfectly, but the HTTP JSON API does not.
+
+**Confirmed Working:**
+- ✅ DAML contracts (v2.1.0 with both signatories)
+- ✅ Cross-participant minting (Issue + Accept)
+- ✅ Party hosting on app-user
+- ✅ Canton gRPC Ledger API
+- ❌ Canton HTTP JSON API v2
+
+**Possible Solutions:**
+1. Use gRPC Ledger API directly instead of JSON API
+2. Check Canton JSON API configuration/startup
+3. Use transaction stream API instead of ACS query
+4. Deploy JSON API separately if not bundled with Canton Network
+
+### Status Summary
+
+**DAML Authorization: ✅ WORKING**
+- Pattern C (both signatories) is correct
+- Cross-participant Accept succeeds
+- Holdings created with proper authorization
+
+**ACS Visibility: ❌ BROKEN**
+- Queries return empty despite Holdings existing
+- Requires investigation into Canton ledger synchronization
+- May be a LocalNet environment issue vs production Canton
+
+**Confidence:** The DAML contract design is correct per DAML Finance standards. The ACS query issue is a Canton integration/configuration problem, not a contract design flaw.
+
 ## References
 
-- **Package ID (v2.0.0 - old):** `eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de`
-- **Package ID (v2.0.1 - new):** `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118`
+- **Package ID (v2.0.0 - original):** `eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de`
+- **Package ID (v2.0.1 - observer):** `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118`
+- **Package ID (v2.1.0 - both sig):** `c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`
 - **App Provider Party:** `app_provider_quickstart-e-1::1220a57d93198bc2f795cf3420debe4d...`
+- **Demo Wallet Party:** `demo-wallet-1::12203bef03ef28882157f215f074792d8b02a1881cd3e0c0bd505150f67a8712ea21`
+
+
+## FINAL RESOLUTION - JSON API v1 Working ✅
+
+**Date:** 2025-10-06
+
+### Problem Solved
+Balance queries were failing because:
+1. JSON API v2 `/v2/state/active-contracts` returns empty `[]`
+2. JWT tokens were missing required `scope` field for v1 API
+3. templateId format was incomplete (`module:entity` instead of `packageId:module:entity`)
+
+### Solution Implemented
+Created `JsonApiV1Service` that uses v1 `/query` endpoint with:
+- JWT including `scope: 'daml_ledger_api'`
+- Full templateId format: `packageId:module:entity`
+- Support for multiple package versions
+
+### Test Results
+```bash
+curl http://localhost:8899/api/cn/balance/demo-wallet-1::12203bef...
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "holdings": [...],
+  "totalBalance": 2200.5,
+  "holdingCount": 4
+}
+```
+
+✅ **Balance queries now working correctly!**
+
+### Files Changed
+1. **Created**: `server/services/jsonApiV1Service.js` - Working v1 API service
+2. **Updated**: `server/routes/cnQuickstartRoutes.js` - Balance endpoint uses v1
+3. **Created**: `SOLUTION.md` - Complete solution documentation
+4. **Created**: `REPRO.md` - Reproduction steps and testing
+
+### Key Learnings
+- v1 JSON API requires `scope: 'daml_ledger_api'` in JWT
+- templateIds must be full format: `packageId:module:entity`
+- v2 query endpoints have separate issue (still returns `[]`)
+- v2 command endpoints work fine
+
+**Status: RESOLVED ✅**
+

@@ -61,3 +61,9 @@ Thumbs.db
 
 # Vite
 vite.config.js.timestamp-*
+
+# Daml build artifacts
+.daml/
+*.hi
+*.hie
+*.o

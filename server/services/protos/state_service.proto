@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package com.daml.ledger.api.v2;
+
+// Minimal proto definitions for StateService
+// Based on grpcurl describe output
+
+service StateService {
+  rpc GetActiveContracts(GetActiveContractsRequest) returns (stream GetActiveContractsResponse);
+}
+
+message GetActiveContractsRequest {
+  TransactionFilter filter = 1;
+  bool verbose = 2 [deprecated = true];
+  int64 active_at_offset = 3;
+}
+
+message GetActiveContractsResponse {
+  string workflow_id = 1;
+  ActiveContract active_contract = 2;
+}
+
+message ActiveContract {
+  CreatedEvent created_event = 1;
+  string synchronizer_id = 2;
+  uint64 reassignment_counter = 3;
+}
+
+message CreatedEvent {
+  string contract_id = 1;
+  Identifier template_id = 2;
+  map<string, string> create_arguments = 3;
+}
+
+message Identifier {
+  string package_id = 1;
+  string module_name = 2;
+  string entity_name = 3;
+}
+
+message TransactionFilter {
+  option deprecated = true;
+  map<string, Filters> filters_by_party = 1;
+}
+
+message Filters {
+  repeated CumulativeFilter cumulative = 1;
+}
+
+message CumulativeFilter {
+  oneof identifier_filter {
+    TemplateFilter template_filter = 3;
+  }
+}
+
+message TemplateFilter {
+  Identifier template_id = 1;
+  bool include_created_event_blob = 2;
+}

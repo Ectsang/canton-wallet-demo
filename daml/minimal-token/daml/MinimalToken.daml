@@ -51,7 +51,7 @@ template Holding
     instrument : ContractId Instrument
     amount     : Decimal
   where
-    signatory admin, owner  -- Both parties sign for cross-participant visibility
+    signatory admin, owner  -- Both parties sign (DAML Finance standard pattern)
 
     -- Transfer part or all of the holding; consumes self and
     -- returns new recipient holding and optional change for sender

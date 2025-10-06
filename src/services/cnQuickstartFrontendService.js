@@ -187,12 +187,85 @@ class CNQuickstartFrontendService {
   }
 
   /**
+   * Query HoldingProposals for a wallet
+   */
+  async getProposals(owner) {
+    try {
+      console.log('🔄 Querying proposals via CN Quickstart...', { owner });
+
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      const response = await fetch(`${this.baseUrl}${this.apiPrefix}/proposals/${encodeURIComponent(owner)}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Proposal query failed: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log('✅ Proposals queried successfully:', result);
+        return result;
+      } else {
+        throw new Error(result.message || 'Query failed');
+      }
+    } catch (error) {
+      console.error('❌ Failed to query proposals:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Accept a HoldingProposal to create Holding
+   */
+  async acceptProposal(proposalId, owner) {
+    try {
+      console.log('🔄 Accepting proposal via CN Quickstart...', { proposalId, owner });
+
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      const response = await fetch(`${this.baseUrl}${this.apiPrefix}/proposals/accept`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          proposalId,
+          owner
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Proposal accept failed: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log('✅ Proposal accepted successfully:', result);
+        return result;
+      } else {
+        throw new Error(result.message || 'Accept failed');
+      }
+    } catch (error) {
+      console.error('❌ Failed to accept proposal:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get token balance for wallet
    */
   async getTokenBalance(owner, instrumentId = null) {
     try {
       console.log('🔄 Getting token balance via CN Quickstart...', { owner, instrumentId });
-      
+
       if (!this.isInitialized) {
         await this.initialize();
       }
@@ -210,7 +283,7 @@ class CNQuickstartFrontendService {
       }
 
       const result = await response.json();
-      
+
       if (result.success) {
         console.log('✅ Token balance retrieved:', result);
         return result;

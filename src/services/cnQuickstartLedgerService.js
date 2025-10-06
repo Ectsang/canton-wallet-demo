@@ -20,8 +20,8 @@ class CNQuickstartLedgerService {
     this.ledgerId = this.participantId;
 
     // MinimalToken package ID from DAR manifest
-    // Using minimal-token-autoaccept v2.0.0 package with auto-accept pattern (IssueAndAccept choice)
-    this.minimalTokenPackageId = 'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de';
+    // Using minimal-token-autoaccept v2.1.0 package with both signatories pattern (Holding: signatory admin, owner)
+    this.minimalTokenPackageId = 'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d';
 
     // App Provider party from LocalNet (PARTY_HINT=quickstart-e-1)
     // This is the party with admin rights on App Provider participant
@@ -406,12 +406,17 @@ class CNQuickstartLedgerService {
       const proposalTemplateId = `${this.minimalTokenPackageId}:MinimalToken:HoldingProposal`;
       const commandId = `accept-proposal-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
-      // For cross-participant Accept, owner exercises on app-provider where HoldingProposal was created
-      // HoldingProposal has signatory admin, observer owner - exists on app-provider participant
+      // For cross-participant Accept, owner exercises on their own participant
+      // HoldingProposal has signatory admin, observer owner - Canton automatically shares to owner's participant
       const token = this.generateJWT([owner], [this.appProviderParty]);
 
-      // Use app-provider participant (where HoldingProposal was created and is stored)
-      const apiUrl = 'http://localhost:3975';  // app-provider JSON API
+      // Determine which participant the owner is on and use their JSON API
+      const isAppProviderParty = owner.startsWith('app_provider');
+      const apiUrl = isAppProviderParty
+        ? 'http://localhost:3975'  // app-provider JSON API
+        : 'http://localhost:2975'; // app-user JSON API (for demo-wallet-X)
+
+      console.log(`📍 Using ${isAppProviderParty ? 'app-provider' : 'app-user'} JSON API for owner: ${owner}`);
 
       const exerciseCommand = {
         templateId: proposalTemplateId,
@@ -507,22 +512,29 @@ class CNQuickstartLedgerService {
 
       console.log('🔍 Querying active holdings via JSON API /v2/state/active-contracts...', { owner, instrumentId });
 
-      const holdingTemplateId = `${this.minimalTokenPackageId}:MinimalToken:Holding`;
+      // Query for Holdings across ALL deployed package versions
+      // v2.0.0: eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de
+      // v2.0.1: 2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118
+      // v2.1.0: c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d
+      const allPackageIds = [
+        'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d', // v2.1.0 (current)
+        '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118', // v2.0.1
+        'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'  // v2.0.0
+      ];
+
+      const holdingTemplateIds = allPackageIds.map(pkgId => `${pkgId}:MinimalToken:Holding`);
 
       // Query app-user participant (where external wallet owner is registered)
-      // Owner is observer on Holding contracts, can query directly
       const apiUrl = 'http://localhost:2975';  // app-user JSON API (not app-provider)
 
-      // Generate JWT: actAs owner (owner can see contracts where they're observer)
+      // Generate JWT: actAs owner
       const token = this.generateJWT(owner);
 
       const requestBody = {
         filter: {
           filtersByParty: {
-            [owner]: {  // Query for contracts visible to owner (as observer)
-              inclusive: [{
-                templateId: holdingTemplateId
-              }]
+            [owner]: {  // Query for contracts visible to owner
+              inclusive: holdingTemplateIds.map(tid => ({ templateId: tid }))
             }
           }
         },
