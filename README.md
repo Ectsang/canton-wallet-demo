@@ -2,7 +2,7 @@
 
 A web application demonstrating **real DAML contract operations** on Canton Network LocalNet. This demo creates actual Instrument and Holding contracts on the Canton ledger using JSON Ledger API with JWT authentication.
 
-**✅ FULLY OPERATIONAL** - End-to-end two-step minting flow verified working (2025-10-06)
+**✅ FULLY OPERATIONAL** - Complete token lifecycle (mint, burn, transfer) verified working (2025-10-07)
 
 ## Features
 
@@ -11,9 +11,14 @@ A web application demonstrating **real DAML contract operations** on Canton Netw
 - **Two-Step Minting Flow**:
   - Step 1: Issue choice creates HoldingProposal (proposal to mint)
   - Step 2: Accept choice creates Holding (actual token balance)
+- **Two-Step Burning Flow** ✨ NEW:
+  - Step 1: ProposeBurn choice creates BurnProposal (owner requests burn)
+  - Step 2: AcceptBurn choice completes burn (admin approves and archives)
+- **Admin Panel**: Review and approve pending burn requests ✨ NEW
 - **Multi-Token Support**: Create and manage multiple token types with dropdown selector
 - **Balance Queries**: Real-time balance display with breakdown by token symbol
-- **Proposal Management**: View and accept pending HoldingProposals
+- **Proposal Management**: View and accept pending HoldingProposals and BurnProposals
+- **Token Transfer**: Transfer holdings between parties
 - **Party Management**: Canton console integration for wallet setup with actAs/readAs rights
 
 ## Prerequisites
@@ -32,22 +37,26 @@ A web application demonstrating **real DAML contract operations** on Canton Netw
 ## Installation
 
 1. Clone the repository:
+
 ```bash
 git clone <repository-url>
 cd canton-wallet-demo
 ```
 
 2. Install dependencies:
+
 ```bash
 npm install
 ```
 
 3. Start the backend server:
+
 ```bash
 npm run server:start
 ```
 
 4. Start the frontend development server:
+
 ```bash
 npm run dev
 ```
@@ -73,8 +82,9 @@ npm run dev
 2. **Wallet Management**: Create/use external wallet, view party ID
 3. **Token Creation**: Create new tokens or select from existing
 4. **Pending Proposals**: View and accept HoldingProposals
-5. **Minting**: Issue tokens (creates proposals)
-6. **Balance Display**: Current balance breakdown by token
+5. **Admin: Burn Proposals**: Review and approve pending burn requests ✨ NEW
+6. **Minting**: Issue tokens (creates proposals)
+7. **Balance Display**: Current balance breakdown by token with burn/transfer buttons
 
 ### Cross-Participant Setup
 
@@ -165,11 +175,13 @@ print("\n✅ Upload complete!")
 ```
 
 Then run:
+
 ```bash
 python3 /tmp/upload_dar_v2.2.0.py
 ```
 
 **Expected Output**:
+
 ```
 📦 Uploading DAR to app-provider...
 ✅ app-provider: {
@@ -190,13 +202,25 @@ python3 /tmp/upload_dar_v2.2.0.py
 
 ### After Upload
 
-Update `src/services/cnQuickstartLedgerService.js` with the new package ID:
+Update package IDs in the following files:
+
+1. `src/services/cnQuickstartLedgerService.js` (line 24):
 
 ```javascript
-this.minimalTokenPackageId = 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae';
+this.minimalTokenPackageId = 'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de'; // v2.4.0
+```
+
+2. `server/services/jsonApiV1Service.js` (line 22):
+
+```javascript
+this.packageIds = [
+  'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de',  // v2.4.0
+  // ... older versions if needed for backward compatibility
+];
 ```
 
 **Why This Method Works**:
+
 - ✅ Uses grpcurl with Canton's PackageService gRPC API
 - ✅ No Python protobuf dependencies required
 - ✅ Direct participant upload (ports 3902, 2902)
@@ -204,6 +228,7 @@ this.minimalTokenPackageId = 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085
 - ✅ Returns package IDs for verification
 
 **Methods That DON'T Work**:
+
 - ❌ `daml ledger upload-dar` (authentication errors)
 - ❌ Python gRPC with Canton protobufs (missing modules)
 - ❌ Canton console via piped commands (participant name issues)
@@ -211,6 +236,7 @@ this.minimalTokenPackageId = 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085
 ## Architecture
 
 ### DAML Integration Architecture
+
 - **JSON Ledger API**: v2 for commands, v1 for queries
 - **JWT Authentication**: HMAC-SHA256 signed tokens with `scope: 'daml_ledger_api'`
 - **Real Contracts**: Actual Instrument, HoldingProposal, and Holding contracts on ledger
@@ -219,10 +245,12 @@ this.minimalTokenPackageId = 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085
 - **No Mocks**: 100% real Canton ledger operations
 
 ### Tech Stack
+
 - **Frontend**: React 19.1.1 + Vite 7.1.5
 - **Backend**: Fastify server (port 8899)
-- **DAML**: MinimalToken v2.2.0 contracts (with Burn choice)
+- **DAML**: MinimalToken v2.4.0 contracts (with ProposeBurn/AcceptBurn pattern) ✨ NEW
 - **Canton**: LocalNet from cn-quickstart
+- **Package ID (v2.4.0)**: `bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de` ✅ CURRENT
 - **Package ID (v2.2.0)**: `c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae`
 - **Package ID (v2.1.0)**: `c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`
 - **Package ID (v2.0.1)**: `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118`
@@ -253,6 +281,7 @@ canton-wallet-demo/
 This demo performs **actual DAML operations** on Canton ledger:
 
 ### API Integration
+
 1. **Commands** (v2): `POST /v2/commands/submit-and-wait-for-transaction`
    - CreateCommand (Instrument)
    - ExerciseCommand (Issue, Accept)
@@ -261,7 +290,7 @@ This demo performs **actual DAML operations** on Canton ledger:
    - Query HoldingProposals by owner
    - Query Instruments by admin
 
-### DAML Contract Flow (MinimalToken v2.2.0)
+### DAML Contract Flow (MinimalToken v2.4.0)
 
 ```
 Instrument (signatory: admin)
@@ -269,22 +298,40 @@ Instrument (signatory: admin)
 HoldingProposal (signatory: admin, observer: owner)
   ↓ Accept choice (controller: owner)
 Holding (signatory: admin, owner)  ← Both sign (DAML Finance pattern)
-  ↓ Burn choice (controller: owner)
-Archived ← Reduces supply
+  ↓ ProposeBurn choice (controller: owner) ✨ NEW
+BurnProposal (signatory: owner, observer: admin) ✨ NEW
+  ↓ AcceptBurn choice (controller: admin) ✨ NEW
+Archived (both BurnProposal and Holding) ← Reduces supply
 ```
 
 **Key Design Decisions:**
+
 1. **Both Signatories**: Holding requires both admin and owner signatures (standard DAML Finance pattern)
 2. **Combined Authority**: When owner exercises Accept, they gain combined authority from proposal signatory
 3. **Cross-Participant**: Works because Accept choice gives owner signing rights
 4. **ACS Visibility**: Both signatories ensure Holdings appear in owner's ACS queries
-5. **Burn Choice**: Owner can burn tokens (archives Holding contract), both parties sign via signatories
+5. **Two-Step Burn** ✨ NEW: ProposeBurn/AcceptBurn pattern for cross-participant dual-signatory burn
+   - Owner creates BurnProposal (signatory: owner, observer: admin)
+   - Admin accepts to complete burn (archives both contracts)
+   - Solves CONTRACT_NOT_ACTIVE error with dual signatories across participants
+6. **Legacy Burn**: Direct Burn choice kept for backward compatibility (may fail cross-participant)
 
-### Verified Test Case (2025-10-06)
+### Verified Test Cases
+
+**Minting Flow** (2025-10-06):
+
 - Token: USA Token (symbol: USA)
 - Flow: Create Instrument → Issue (HoldingProposal) → Accept (Holding) ✅
 - Cross-participant: app-provider (admin) → app-user (demo-wallet-1) ✅
 - Balance query: Returns 1000 USA tokens ✅
+
+**Burning Flow** (2025-10-07) ✨ NEW:
+
+- Flow: User clicks "🔥 Burn" → ProposeBurn (BurnProposal created) ✅
+- Admin sees proposal in admin panel ✅
+- Admin clicks "🔥 Approve Burn" → AcceptBurn (both contracts archived) ✅
+- Balance updated immediately after approval ✅
+- Cross-participant burn working perfectly ✅
 
 **No mocks, no simulations - everything is real Canton ledger data!**
 

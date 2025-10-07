@@ -3,58 +3,87 @@
 ## Current Status (2025-10-07)
 
 ### ✅ WORKING Features
-- **v2.2.0 DAML Contract**: Burn choice implemented and deployed
+- **v2.4.0 DAML Contract**: ProposeBurn/AcceptBurn pattern implemented ✨ NEW
 - **Cross-Participant Minting**: Issue + Accept flow working
-- **Package Management**: v2.2.0 (c90d4ebe...) set as active, old versions hidden
-- **Transfer Feature**: Implemented (for migrating old holdings)
-- **UI**: Transfer and Burn buttons displayed
+- **Cross-Participant Burning**: ProposeBurn + AcceptBurn flow working ✨ NEW
+- **Package Management**: v2.4.0 (bc5800fb...) set as active
+- **Admin Interface**: Burn proposal approval panel ✨ NEW
+- **UI**: Burn buttons create proposals, admin approves
 
-### ❌ KNOWN ISSUES
+### 🎉 SOLVED ISSUES
 
-#### 1. Burn Fails on Newly Created Holdings (Race Condition)
-**Symptom**: Burn immediately after Accept returns `CONTRACT_NOT_ACTIVE`
-
-**Error**:
-```
-CONTRACT_NOT_ACTIVE(11,371eafc1): Interpretation error: Error: Update failed due to fetch of an inactive contract 006dfbb153c0da3d22bbb539b0ad32c6cf00b4d791cfbe813cf6b60426b7b7623cca11122066722950018381a946476e544192556dec8ca4b0a275ab570f79e82bff40a9d7 (MinimalToken:Holding@c90d4ebe).
-The contract had been consumed in sub-transaction #NodeId(0):
-```
-
-**Timeline**:
-- 16:36:40.567459Z: Holding created (Accept choice)
-- 16:36:45.913448Z: Burn attempted (5 seconds later)
-- Result: CONTRACT_NOT_ACTIVE error
-
-**Root Cause**: Canton's active contract set (ACS) view hasn't fully propagated to the participant yet. The holding was JUST created, and when queried immediately for burn, Canton sees it as "inactive" or "consumed" because the creation event hasn't fully settled.
-
-**Workaround**: Wait 5-10 seconds after creating a holding before burning it, or refresh the UI to force a new ACS query.
-
-**Proper Fix Needed**:
-- Add a delay/retry mechanism in burn operations
-- Query ACS before burn to ensure contract is visible
-- Add transaction finality check
-
-#### 2. Transfer Fails on Old Package Versions
-**Symptom**: Transfer buttons fail on v2.0.x and v2.1.0 holdings
-
-**Error**:
-```
-CONTRACT_NOT_ACTIVE(11,f40f38aa): Interpretation error: Error: Update failed due to fetch of an inactive contract ... (MinimalToken:Holding@c90d4ebe)
-```
+#### Cross-Participant Burn Now Working! ✅
+**Problem**: Direct Burn choice failed on cross-participant Holdings with dual signatories
 
 **Root Cause**:
-- Query uses old package IDs to FIND holdings (commented out in jsonApiV1Service)
-- Transfer uses v2.2.0 template ID to EXERCISE the choice
-- Mismatch: trying to exercise v2.2.0 choice on v2.1.0 contracts fails
+- Holdings have `signatory admin, owner` (both on different participants)
+- Direct Burn only used `actAs: [owner]`, causing CONTRACT_NOT_ACTIVE
+- Canton requires propose-and-accept pattern for cross-participant dual-signatory operations
 
-**Solution**: Old package IDs now commented out - only v2.2.0 holdings visible for clean demo
+**Solution Implemented**: ProposeBurn/AcceptBurn Pattern (v2.4.0)
+
+```daml
+-- Owner proposes burn
+choice ProposeBurn : ContractId BurnProposal
+  controller owner
+  do
+    create BurnProposal with
+      admin
+      owner
+      holding = self
+
+-- Admin accepts and completes burn
+template BurnProposal
+  with
+    admin   : Party
+    owner   : Party
+    holding : ContractId Holding
+  where
+    signatory owner
+    observer admin
+
+    choice AcceptBurn : ()
+      controller admin
+      do
+        exercise holding Archive
+        return ()
+```
+
+**Flow**:
+1. User clicks "🔥 Burn" button → Owner exercises ProposeBurn → Creates BurnProposal contract
+2. Admin sees pending burn request in admin panel UI
+3. Admin clicks "🔥 Approve Burn" → Admin exercises AcceptBurn → Archives both BurnProposal and Holding
+
+**Result**: ✅ Cross-participant burns working perfectly!
+
+### ⚠️ KNOWN LIMITATIONS
+
+#### Legacy Burn Choice May Not Work
+The direct `Burn` choice is kept for backward compatibility but may fail on cross-participant Holdings. Use ProposeBurn/AcceptBurn instead.
 
 ## DAML Contract Evolution
 
-### v2.2.0 (Current - c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae)
-**Added**: Burn choice
+### v2.4.0 (Current - bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de) ✨ NEW
+**Added**: ProposeBurn/AcceptBurn pattern + kept legacy Burn
 
 ```daml
+-- NEW: Propose-and-accept burn pattern (recommended)
+choice ProposeBurn : ContractId BurnProposal
+  controller owner
+  do
+    create BurnProposal with admin, owner, holding = self
+
+template BurnProposal
+  where
+    signatory owner
+    observer admin
+
+    choice AcceptBurn : ()
+      controller admin
+      do
+        exercise holding Archive
+
+-- LEGACY: Direct burn (may not work cross-participant)
 choice Burn : ()
   controller owner
   do
@@ -66,7 +95,16 @@ choice Burn : ()
 - ✅ Issue choice (admin → creates HoldingProposal)
 - ✅ Accept choice (owner → creates Holding from proposal)
 - ✅ Transfer choice (owner → transfer tokens)
-- ✅ Burn choice (owner → destroy holding)
+- ✅ ProposeBurn choice (owner → creates BurnProposal) ✨ NEW
+- ✅ AcceptBurn choice (admin → completes burn) ✨ NEW
+- ⚠️ Burn choice (legacy, may fail cross-participant)
+
+### v2.2.0 (c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae)
+**Added**: Direct Burn choice (superseded by ProposeBurn)
+
+**Features**:
+- ✅ Issue, Accept, Transfer
+- ⚠️ Burn (fails on cross-participant Holdings)
 
 ### v2.1.0 (c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d)
 - Issue, Accept, Transfer only (no Burn)
@@ -78,31 +116,42 @@ choice Burn : ()
 
 ### Active Package IDs (Queried)
 **Files**:
-- `server/services/jsonApiV1Service.js` (lines 21-26)
-- `src/services/cnQuickstartLedgerService.js` (lines 757-762)
+- `server/services/jsonApiV1Service.js` (lines 21-27)
+- `src/services/cnQuickstartLedgerService.js` (line 24)
 
-**Current Config**:
+**Current Config** (jsonApiV1Service.js):
 ```javascript
 this.packageIds = [
-  'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae',  // v2.2.0 (with Burn) ✅ ACTIVE
+  'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de',  // v2.4.0 (with ProposeBurn/AcceptBurn) ✅ PRIMARY
+  // 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae',  // v2.2.0 (with Burn) - for old Instruments
   // 'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d',  // v2.1.0 ❌ HIDDEN
   // '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118',  // v2.0.1 ❌ HIDDEN
   // 'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'   // v2.0.0 ❌ HIDDEN
 ];
 ```
 
-**Effect**: Only v2.2.0 holdings shown in UI (clean demo state)
+**Current Config** (cnQuickstartLedgerService.js):
+```javascript
+this.minimalTokenPackageId = 'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de'; // v2.4.0
+```
+
+**Effect**:
+- v2.4.0 used for all new operations (mint, burn proposals, accepts)
+- Can uncomment v2.2.0 to show old Instruments in queries
+- Clean demo state with latest contract version
 
 ## Service Architecture
 
 ### Actually Used Services ✅
 1. **CNQuickstartLedgerService** (`src/services/cnQuickstartLedgerService.js`)
-   - **Purpose**: Execute commands (Issue, Accept, Burn, Transfer) via JSON API v2
+   - **Purpose**: Execute commands (Issue, Accept, ProposeBurn, AcceptBurn, Transfer) via JSON API v2
    - **Used By**: All POST endpoints in `server/routes/cnQuickstartRoutes.js`
+   - **Methods**: issueTokens(), acceptProposal(), proposeBurnHolding(), acceptBurnProposal(), transferHolding()
 
 2. **JsonApiV1Service** (`server/services/jsonApiV1Service.js`)
-   - **Purpose**: Query contracts (Holdings, HoldingProposals) via JSON API v1
-   - **Used By**: `/api/cn/balance/:owner`, `/api/cn/proposals/:owner`
+   - **Purpose**: Query contracts (Holdings, HoldingProposals, BurnProposals, Instruments) via JSON API v1
+   - **Used By**: `/api/cn/balance/:owner`, `/api/cn/proposals/:owner`, `/api/cn/burn-proposals/:party`
+   - **Methods**: queryHoldings(), queryProposals(), queryBurnProposals(), queryInstruments()
 
 ### NOT Used Services ❌
 - CNQuickstartGrpcBalanceService (imported but never called)
@@ -114,12 +163,14 @@ this.packageIds = [
 
 **Main Service**: `CNQuickstartFrontendService` (`src/services/cnQuickstartFrontendService.js`)
 - Calls backend API endpoints
-- Methods: initialize, createToken, mintTokens, getProposals, acceptProposal, burnHolding, transferHolding, getTokenBalance
+- Methods: initialize, createToken, mintTokens, getProposals, acceptProposal, proposeBurnHolding, acceptBurnProposal, queryBurnProposals, transferHolding, getTokenBalance
 
 **UI State**: `src/App.jsx`
 - Added `appProviderParty` state (line 17)
+- Added `burnProposals` state (line 41)
 - Set via `setAppProviderParty(initResult.appProviderParty)` on init (line 55)
 - Used in `transferToAdmin()` function (line 398)
+- Admin burn proposals panel (lines 1090-1151)
 
 ## Transfer Feature Implementation
 
@@ -160,14 +211,18 @@ Result: 1000 tokens in owner's balance
 - Holding created with both admin and owner as signatories
 - Balance query shows tokens
 
-### 2. Burn (with timing consideration) ⚠️
+### 2. Cross-Participant Two-Step Burning ✅
 ```
-Owner (app-user) → Burn choice → Holding archived
+Owner (app-user) → ProposeBurn choice → BurnProposal created
+Admin (app-provider) → AcceptBurn choice → Holding + BurnProposal archived
 Result: Tokens removed from supply
 ```
 
-**Status**: Implemented but requires waiting after holding creation
-**Issue**: Race condition - must wait for ACS to propagate
+**Verified**: 2025-10-07 (v2.4.0)
+- User clicks "🔥 Burn" → BurnProposal created successfully
+- Admin sees proposal in admin panel
+- Admin clicks "🔥 Approve Burn" → Both contracts archived
+- Balance reflects burn immediately after acceptance
 
 ## DAR Upload Method (Proven Working)
 
@@ -207,25 +262,28 @@ subprocess.run([
 ], capture_output=True, text=True)
 ```
 
-**After Upload**: Update `cnQuickstartLedgerService.js` line 15 with new package ID
+**After Upload**: Update `cnQuickstartLedgerService.js` line 24 with new package ID
 
 ## Next Steps
 
-### Priority 1: Fix Burn Race Condition
-**Options**:
-1. Add 5-second delay before allowing burn operations after Accept
-2. Query ACS before burn to verify contract visibility
-3. Add retry logic (try burn, if CONTRACT_NOT_ACTIVE, wait 2s and retry)
+### Completed ✅
+- ~~Fix Burn Race Condition~~ → Implemented ProposeBurn/AcceptBurn pattern (v2.4.0)
+- ~~Test end-to-end burn flow~~ → Verified working on 2025-10-07
 
-### Priority 2: Testing
-- Test Burn on holdings that are >10 seconds old (should work)
-- Verify Transfer still fails on old v2.1.0 holdings (expected with current config)
-- Test end-to-end: Create token → Issue → Accept → Wait 10s → Burn ✅
+### Priority 1: Testing
+- Test cross-participant burn with multiple tokens
+- Verify backward compatibility with v2.2.0 Instruments
+- Load testing with multiple concurrent burn proposals
 
-### Priority 3: Clean Up
+### Priority 2: Clean Up
 - Remove dead code (CNQuickstartGrpcBalanceService, grpcLedgerService, etc.)
-- Add UI feedback for race condition (e.g., "Holding just created, please wait before burning")
+- Consider implementing RejectBurn choice (currently placeholder)
 - Consider removing Transfer feature if old holdings are permanently hidden
+
+### Priority 3: Enhancements
+- Add burn history/audit log
+- Add batch burn operations
+- Implement burn limits/permissions
 
 ## Environment
 
@@ -236,42 +294,79 @@ subprocess.run([
 - **Frontend Dev Server**: localhost:5173 (Vite)
 - **JWT Secret**: "unsafe" (Canton LocalNet default)
 
-## Files Modified (This Session)
+## Files Modified (Recent Sessions)
+
+### v2.4.0 Implementation (ProposeBurn/AcceptBurn Pattern - 2025-10-07)
 
 1. **DAML Contract**: `daml/minimal-token/daml/MinimalToken.daml`
-   - Added Burn choice (lines 84-88)
+   - Added ProposeBurn choice on Holding template
+   - Added BurnProposal template with AcceptBurn choice
+   - Added RejectBurn choice (placeholder)
+   - Kept legacy Burn choice for backward compatibility
 
-2. **Backend Routes**: `server/routes/cnQuickstartRoutes.js`
-   - Added `/api/cn/holdings/transfer` endpoint (lines 370-447)
+2. **DAML Package**: `daml/minimal-token/daml.yaml`
+   - Updated version to 2.4.0
 
-3. **Ledger Service**: `src/services/cnQuickstartLedgerService.js`
-   - Added `transferHolding()` method (lines 622-729)
-   - Updated `allPackageIds` to show only v2.2.0 (lines 757-762)
+3. **Backend Routes**: `server/routes/cnQuickstartRoutes.js`
+   - Added `POST /api/cn/holdings/propose-burn` endpoint (lines 370-437)
+   - Added `POST /api/cn/burn-proposals/accept` endpoint (lines 439-505)
+   - Added `GET /api/cn/burn-proposals/:party` endpoint (lines 507-573)
 
-4. **JSON API Service**: `server/services/jsonApiV1Service.js`
-   - Added v2.2.0 to packageIds, commented out old versions (lines 21-26)
+4. **Ledger Service**: `src/services/cnQuickstartLedgerService.js`
+   - Added `proposeBurnHolding()` method (lines 510-598)
+   - Added `acceptBurnProposal()` method (lines 721-812)
+   - Updated package ID to v2.4.0 (line 24)
 
-5. **Frontend Service**: `src/services/cnQuickstartFrontendService.js`
-   - Added `transferHolding()` method (lines 306-344)
+5. **JSON API Service**: `server/services/jsonApiV1Service.js`
+   - Added `queryBurnProposals()` method (lines 269-325)
+   - Updated packageIds to v2.4.0 (line 22)
 
-6. **Frontend App**: `src/App.jsx`
-   - Added `appProviderParty` state (line 17)
-   - Added `setAppProviderParty()` in `initializeApp()` (line 55)
-   - Added `transferToAdmin()` function (lines 386-411)
-   - Added Transfer button UI (lines 1081-1114)
+6. **Frontend Service**: `src/services/cnQuickstartFrontendService.js`
+   - Added `proposeBurnHolding()` method (lines 265-301)
+   - Added `acceptBurnProposal()` method (lines 303-342)
+   - Added `queryBurnProposals()` method (lines 344-379)
 
-7. **Package Management**:
-   - Commented out old package IDs in jsonApiV1Service.js
-   - Commented out old package IDs in cnQuickstartLedgerService.js
+7. **Frontend App**: `src/App.jsx`
+   - Added `burnProposals` state (line 41)
+   - Updated `burnHolding()` to use ProposeBurn (lines 362-385)
+   - Added `loadBurnProposals()` handler (lines 503-524)
+   - Added `acceptBurnProposal()` handler (lines 526-561)
+   - Added admin burn proposals panel UI (lines 1090-1151)
+   - Added 1-second delay after accept for Canton processing (line 551)
+
+### v2.2.0 Implementation (Transfer Feature - Previous Session)
+
+1. **Backend Routes**: Added `/api/cn/holdings/transfer` endpoint
+2. **Ledger Service**: Added `transferHolding()` method
+3. **Frontend**: Added Transfer button and `transferToAdmin()` function
 
 ## Key Learnings
 
-1. **DAML Contract Immutability**: Old contracts can't gain new choices from upgraded templates. Must create new holdings with new package version to use Burn.
+1. **DAML Contract Immutability**: Old contracts can't gain new choices from upgraded templates. Must create new holdings with new package version to use new choices.
 
-2. **Package Version Matching**: Exercise commands MUST use the exact package ID that created the contract. Cannot exercise v2.2.0 choice on v2.1.0 contract.
+2. **Package Version Matching**: Exercise commands MUST use the exact package ID that created the contract. Cannot exercise v2.4.0 choice on v2.2.0 contract.
 
-3. **Race Conditions**: Canton's ACS view takes time to propagate. Operations on just-created contracts may fail with CONTRACT_NOT_ACTIVE.
+3. **Cross-Participant Dual Signatories**: Holdings with `signatory admin, owner` across different participants require special handling:
+   - Direct choices controlled by only one signatory may fail with CONTRACT_NOT_ACTIVE
+   - Solution: Use propose-and-accept pattern where each party acts separately
+   - ProposeBurn (owner creates proposal) → AcceptBurn (admin completes)
 
-4. **Service Separation**: JSON API v1 for queries (batch queries with templateIds), v2 for commands (single operations with full request structure).
+4. **Canton Backward Compatibility**: Package upgrades CANNOT remove choices:
+   - First attempt (v2.3.0): Removed Burn, added ProposeBurn → Upload failed
+   - Solution (v2.4.0): Keep both Burn (legacy) and ProposeBurn (recommended)
 
-5. **Hidden vs Deleted**: Commenting out package IDs HIDES contracts from queries but doesn't delete them from ledger. They still exist and can be queried with correct template ID.
+5. **UI State Timing**: Canton needs time to process contract archives:
+   - After AcceptBurn, BurnProposal and Holding are archived
+   - Immediate re-query may still show old contracts
+   - Solution: Add 1-second delay before reloading UI state
+
+6. **Service Separation**:
+   - JSON API v1 for queries (batch queries with templateIds)
+   - JSON API v2 for commands (single operations with full request structure)
+
+7. **Hidden vs Deleted**: Commenting out package IDs HIDES contracts from queries but doesn't delete them from ledger. They still exist and can be queried with correct template ID.
+
+8. **Observer Pattern for Cross-Participant**:
+   - BurnProposal has `signatory owner, observer admin`
+   - This allows admin on different participant to see and accept proposal
+   - AcceptBurn exercises Archive on the Holding, using admin's authority
