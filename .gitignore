@@ -67,3 +67,7 @@ vite.config.js.timestamp-*
 *.hi
 *.hie
 *.o
+
+debug/
+
+__pycache__/

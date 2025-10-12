@@ -10,6 +10,7 @@
  */
 
 import { createHmac } from 'crypto';
+import MINIMAL_TOKEN_PACKAGE_CONFIG from '../../src/config/packageConfig.js';
 
 class JsonApiV1Service {
   constructor(appProviderParty = null) {
@@ -17,14 +18,8 @@ class JsonApiV1Service {
     this.jwtSecret = 'unsafe';  // Canton LocalNet JWT secret
     this.appProviderParty = appProviderParty;  // App provider party for querying Instruments
 
-    // All deployed package IDs for MinimalToken
-    this.packageIds = [
-      'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de',  // v2.4.0 (with ProposeBurn/AcceptBurn)
-      // 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae',  // v2.2.0 (with Burn) - for old Instruments
-      // 'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d',  // v2.1.0
-      // '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118',  // v2.0.1
-      // 'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'   // v2.0.0
-    ];
+    // All deployed package IDs from centralized config
+    this.packageIds = Object.values(MINIMAL_TOKEN_PACKAGE_CONFIG.versions);
   }
 
   /**

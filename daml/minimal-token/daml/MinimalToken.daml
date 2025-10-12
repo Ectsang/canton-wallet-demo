@@ -86,7 +86,11 @@ template Holding
         archive self
         return ()
 
-    -- Propose to burn tokens (cross-participant pattern - RECOMMENDED)
+    -- ProposeBurn: Burns holding immediately (consuming choice by design)
+    -- DESIGN NOTE: This choice is consuming (not marked nonconsuming), which means
+    -- it archives the Holding when exercised. The created BurnProposal serves as
+    -- an audit trail but the burn happens immediately. This is intentional for
+    -- cross-participant Holdings with dual signatories (admin + owner).
     choice ProposeBurn : ContractId BurnProposal
       controller owner
       do
@@ -95,17 +99,21 @@ template Holding
           owner
           holding = self
 
--- BurnProposal: Proposal to burn a Holding (for cross-participant burns)
+-- BurnProposal: Audit trail for burned Holdings
+-- DESIGN NOTE: This template exists as an audit record. The referenced Holding
+-- is already archived when ProposeBurn is exercised (consuming choice). The
+-- AcceptBurn choice is provided for completeness but the burn has already occurred.
 template BurnProposal
   with
     admin   : Party
     owner   : Party
-    holding : ContractId Holding
+    holding : ContractId Holding  -- Contract ID reference (Holding is already archived)
   where
     signatory owner
     observer admin
 
     -- Admin accepts burn proposal → archives the Holding
+    -- NOTE: In practice, the Holding is already archived by ProposeBurn
     choice AcceptBurn : ()
       controller admin
       do

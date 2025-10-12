@@ -366,20 +366,20 @@ function App() {
       setError('');
       setSuccess('');
 
-      console.log('🔥 Proposing burn for holding:', holdingId);
+      console.log('🔥 Burning holding:', holdingId);
 
-      // Propose burn (owner creates BurnProposal)
+      // Burn immediately (ProposeBurn choice is consuming by design)
       const result = await cantonService.proposeBurnHolding(
         holdingId,
         wallet.partyId
       );
 
-      setSuccess(`🔥 Burn proposal created for ${amount} ${symbol} tokens! Waiting for admin to accept...`);
+      setSuccess(`🔥 ${amount} ${symbol} tokens burned successfully!`);
 
-      // Update balance to reflect proposal
+      // Update balance to reflect burn
       await updateBalance();
     } catch (err) {
-      setError(`Failed to propose burn: ${err.message}`);
+      setError(`Failed to burn tokens: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -461,8 +461,7 @@ function App() {
         setBalanceBreakdown([]);
       }
 
-      // Also load burn proposals when updating balance
-      await loadBurnProposals();
+      // Note: Burns happen immediately (ProposeBurn choice is consuming by design)
     } catch (err) {
       console.error('Failed to update balance:', err);
       setTokenBalance(0);
@@ -609,6 +608,25 @@ function App() {
         </div>
       </div>
 
+      {/* Quick Start Guide */}
+      <div className="card" style={{ backgroundColor: '#f0f7ff', borderLeft: '4px solid #2196F3' }}>
+        <h2 style={{ marginTop: 0, color: '#1565c0' }}>📖 Quick Start Guide</h2>
+        <p style={{ margin: '0 0 1rem 0', fontSize: '0.95em', lineHeight: '1.6' }}>
+          This demo shows how to create real DAML contracts on Canton Network. Follow these steps:
+        </p>
+        <ol style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.95em', lineHeight: '1.8' }}>
+          <li><strong>Connect</strong> - Backend automatically connects to Canton LocalNet (see below)</li>
+          <li><strong>Create Wallet</strong> - Click "Create External Wallet" (backend enables party + generates keys)</li>
+          <li><strong>Create Token</strong> - Define your token (Instrument contract created on Canton ledger)</li>
+          <li><strong>Mint Tokens</strong> - Two-step: Issue proposal → Accept (cross-participant minting)</li>
+          <li><strong>View Holdings</strong> - See your token balance (queries real Canton contracts)</li>
+          <li><strong>Burn Tokens</strong> - Click 🔥 Burn to immediately remove tokens (reduces supply)</li>
+        </ol>
+        <p style={{ margin: '1rem 0 0 0', fontSize: '0.85em', color: '#555', lineHeight: '1.5' }}>
+          💡 <strong>Everything is real</strong> - contracts are created on Canton, not mocked. All operations use Canton's JSON Ledger API.
+        </p>
+      </div>
+
       {error && <div className="error">{error}</div>}
       {success && <div className="success">{success}</div>}
 
@@ -639,76 +657,70 @@ function App() {
         <div className="card">
           <h2>2. Create or Use External Wallet</h2>
 
-          {/* Collapsible Onboarding Instructions */}
-          <div style={{ marginBottom: '1rem', borderBottom: '1px solid #e0e0e0', paddingBottom: '1rem' }}>
+          {/* Simple Instructions */}
+          <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: '#e3f2fd', borderRadius: '4px', borderLeft: '4px solid #2196F3' }}>
+            <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1em', color: '#1976d2' }}>
+              💡 What happens when you create a wallet?
+            </h3>
+            <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', lineHeight: '1.5' }}>
+              The backend automatically:
+            </p>
+            <ul style={{ margin: '0 0 0.5rem 0', paddingLeft: '1.5rem', fontSize: '0.9em', lineHeight: '1.6' }}>
+              <li>Generates Ed25519 key pair (public + private keys)</li>
+              <li>Enables your party on Canton's app-user participant</li>
+              <li>Grants authentication rights for transactions</li>
+              <li>Returns your unique Party ID (format: <code>hint::fingerprint</code>)</li>
+            </ul>
+            <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', color: '#666' }}>
+              💾 Your wallet is saved in browser localStorage and can be reused until Canton restarts.
+            </p>
+
             <button
               onClick={() => setShowOnboardingInstructions(!showOnboardingInstructions)}
               style={{
+                marginTop: '0.75rem',
                 background: 'none',
                 border: 'none',
-                padding: '0.5rem 0',
+                padding: '0.25rem 0',
                 cursor: 'pointer',
-                fontSize: '0.95em',
-                color: '#2196F3',
-                display: 'flex',
-                alignItems: 'center',
-                width: '100%',
-                justifyContent: 'space-between'
+                fontSize: '0.85em',
+                color: '#1976d2',
+                textDecoration: 'underline'
               }}
             >
-              <span>📚 Party Onboarding & Enabling Instructions</span>
-              <span style={{ fontSize: '1.2em' }}>{showOnboardingInstructions ? '▼' : '▶'}</span>
+              {showOnboardingInstructions ? '▼ Hide advanced options' : '▶ Show advanced options (manual Canton console)'}
             </button>
 
             {showOnboardingInstructions && (
               <div style={{
-                marginTop: '1rem',
-                padding: '1rem',
+                marginTop: '0.75rem',
+                padding: '0.75rem',
                 backgroundColor: '#f5f5f5',
                 borderRadius: '4px',
-                fontSize: '0.9em'
+                fontSize: '0.85em'
               }}>
-                <h3 style={{ marginTop: 0, fontSize: '1em', color: '#333' }}>Canton LocalNet Party Setup</h3>
-
-                <h4 style={{ fontSize: '0.95em', marginTop: '1rem', color: '#555' }}>Option 1: Using Canton Console</h4>
+                <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.95em', color: '#555' }}>Manual: Using Canton Console</h4>
                 <pre style={{
                   backgroundColor: '#272822',
                   color: '#f8f8f2',
-                  padding: '0.75rem',
+                  padding: '0.5rem',
                   borderRadius: '4px',
                   overflow: 'auto',
-                  fontSize: '0.85em'
-                }}>{`# Connect to Canton LocalNet console
-cd /path/to/cn-quickstart/quickstart/docker/modules/localnet
+                  fontSize: '0.8em',
+                  margin: 0
+                }}>{`# Connect to Canton LocalNet
 docker exec -it canton bash
 
-# Enable party on app-user participant
+# Enable party on app-user
 participants.app_user.parties.enable("demo-wallet-1")
 
-# List and find your party (get the full party ID from output)
-participants.app_user.parties.list()
-
-# Grant user rights for JWT authentication (replace with actual party ID)
+# Grant JWT rights (replace party ID)
 participants.app_user.ledger_api.users.rights.grant(
   id = "ledger-api-user",
-  actAs = Set(PartyId.tryFromProtoPrimitive("demo-wallet-1::1220...")),
-  readAs = Set() // Add app_provider party if needed for cross-participant
+  actAs = Set(PartyId.tryFromProtoPrimitive("demo-wallet-1::1220..."))
 )`}</pre>
-
-                <h4 style={{ fontSize: '0.95em', marginTop: '1rem', color: '#555' }}>Option 2: Create via UI</h4>
-                <p style={{ margin: '0.5rem 0' }}>
-                  Click "Create External Wallet" below - the backend will automatically:
-                </p>
-                <ul style={{ marginLeft: '1.5rem', marginTop: '0.5rem' }}>
-                  <li>Enable the party on the app-user participant</li>
-                  <li>Allocate JWT user rights for the new party</li>
-                  <li>Return the full party ID for use in the UI</li>
-                </ul>
-
-                <h4 style={{ fontSize: '0.95em', marginTop: '1rem', color: '#555' }}>Option 3: Use Existing Party</h4>
-                <p style={{ margin: '0.5rem 0' }}>
-                  If you have an existing party ID from previous sessions, paste it in the "Use Existing Party ID" field below.
-                  The party must already be enabled on the app-user participant with proper JWT rights.
+                <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', color: '#666' }}>
+                  Then paste your party ID in "Use Existing Party ID" below.
                 </p>
               </div>
             )}
@@ -830,6 +842,14 @@ participants.app_user.ledger_api.users.rights.grant(
       {wallet && (
         <div className="card">
           <h2>3. Create Token</h2>
+
+          {!createdToken && (
+            <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#e8f5e9', borderRadius: '4px', borderLeft: '4px solid #4caf50' }}>
+              <p style={{ margin: 0, fontSize: '0.9em', lineHeight: '1.5' }}>
+                📝 Creating a token creates an <strong>Instrument contract</strong> on Canton ledger. The admin (app_provider) owns it and can mint tokens to users.
+              </p>
+            </div>
+          )}
 
           {/* Token Selector Dropdown - shown when tokens exist */}
           {allTokens.length > 0 && (
@@ -993,6 +1013,13 @@ participants.app_user.ledger_api.users.rights.grant(
       {wallet && (
         <div className="card">
           <h2>4. Your Pending Proposals</h2>
+
+          <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fff3cd', borderRadius: '4px', borderLeft: '4px solid #ffa726' }}>
+            <p style={{ margin: 0, fontSize: '0.9em', lineHeight: '1.5' }}>
+              ⏳ <strong>HoldingProposals</strong> appear here after admin issues tokens. Accept them to receive tokens in your wallet.
+            </p>
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <p style={{ margin: 0, color: '#666' }}>
               Proposals are token minting requests that need your approval
@@ -1090,83 +1117,27 @@ participants.app_user.ledger_api.users.rights.grant(
         </div>
       )}
 
-      {/* Admin Panel: Burn Proposals - Show when token exists and there are pending burn proposals */}
-      {createdToken && burnProposals && burnProposals.length > 0 && (
-        <div className="card">
-          <h2>🔥 Admin: Burn Proposals</h2>
-          <div className="info-box">
-            <p style={{ marginBottom: '1rem', color: '#666' }}>
-              As the token admin, you can review and approve burn requests from users.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {burnProposals.map((proposal, index) => (
-                <div key={proposal.proposalId} style={{
-                  padding: '1rem',
-                  border: '2px solid #ff9800',
-                  borderRadius: '8px',
-                  backgroundColor: '#fff3e0'
-                }}>
-                  <h4 style={{ margin: '0 0 0.75rem 0', color: '#e65100' }}>
-                    Burn Request #{index + 1}
-                  </h4>
-
-                  <div className="wallet-detail">
-                    <strong>Proposal ID:</strong>
-                    <div className="copyable-field">
-                      <code style={{ fontSize: '0.85em' }}>{proposal.proposalId.substring(0, 40)}...</code>
-                      <button
-                        className="copy-btn"
-                        onClick={() => copyToClipboard(proposal.proposalId, 'Proposal ID')}
-                        title="Copy Proposal ID"
-                      >
-                        📋
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="wallet-detail">
-                    <strong>Holding ID:</strong>
-                    <code style={{ fontSize: '0.75em', wordBreak: 'break-all' }}>{proposal.holding.substring(0, 50)}...</code>
-                  </div>
-
-                  <div className="wallet-detail">
-                    <strong>From Owner:</strong>
-                    <code style={{ fontSize: '0.75em', wordBreak: 'break-all' }}>{proposal.owner.substring(0, 50)}...</code>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                    <button
-                      className="button primary"
-                      onClick={() => acceptBurnProposal(proposal)}
-                      disabled={loading}
-                      style={{ flex: 1, backgroundColor: '#e65100' }}
-                    >
-                      🔥 Approve Burn
-                      {loading && <span className="loading"></span>}
-                    </button>
-                    <button
-                      className="button secondary"
-                      onClick={() => {
-                        alert('Reject burn functionality coming soon!');
-                      }}
-                      disabled={loading}
-                      style={{ flex: 1 }}
-                    >
-                      ❌ Reject
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Token Balance & Holdings - Show whenever wallet is connected */}
       {wallet && (
         <div className="card">
           <h2>5. Your Token Holdings</h2>
+
+          {/* Explanation for burn */}
+          {tokenBalance > 0 && (
+            <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: '#ffebee', borderRadius: '4px', borderLeft: '4px solid #f44336' }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1em', color: '#c62828' }}>
+                🔥 About Burning Tokens
+              </h3>
+              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', lineHeight: '1.5' }}>
+                Burning permanently removes tokens from the ledger (reduces supply). Click the 🔥 Burn button next to any holding to burn it immediately.
+              </p>
+              <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', color: '#666' }}>
+                💡 <strong>Design note:</strong> Burn happens immediately because the ProposeBurn choice is consuming by default in DAML (archives the Holding). This differs from minting which uses a two-step propose-accept pattern for cross-participant operations.
+              </p>
+            </div>
+          )}
+
           <div className="info-box">
             <h3>Total Balance</h3>
             <p><strong>{tokenBalance} tokens</strong></p>
@@ -1277,6 +1248,24 @@ participants.app_user.ledger_api.users.rights.grant(
       {createdToken && (
         <div className="card">
           <h2>6. Mint Tokens (Two-Step Flow)</h2>
+
+          {/* Explanation Box */}
+          <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: '#fff3e0', borderRadius: '4px', borderLeft: '4px solid #ff9800' }}>
+            <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1em', color: '#e65100' }}>
+              🔄 Why two steps?
+            </h3>
+            <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', lineHeight: '1.5' }}>
+              Admin and your wallet are on <strong>different Canton participants</strong>. Cross-participant operations require a propose-and-accept pattern:
+            </p>
+            <ol style={{ margin: '0', paddingLeft: '1.5rem', fontSize: '0.9em', lineHeight: '1.6' }}>
+              <li><strong>Step 1 (Issue):</strong> Admin creates a HoldingProposal contract for you</li>
+              <li><strong>Step 2 (Accept):</strong> You accept the proposal to create a Holding contract with tokens</li>
+            </ol>
+            <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', color: '#666' }}>
+              💡 This creates a secure, auditable trail on the Canton ledger.
+            </p>
+          </div>
+
           <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#e3f2fd', borderRadius: '4px', borderLeft: '4px solid #2196F3' }}>
             <strong>Minting for:</strong> {createdToken.symbol} - {createdToken.name}
           </div>

@@ -7,6 +7,7 @@
  */
 
 import { createHmac } from 'crypto';
+import MINIMAL_TOKEN_PACKAGE_CONFIG from '../config/packageConfig.js';
 
 class CNQuickstartLedgerService {
   constructor() {
@@ -19,23 +20,22 @@ class CNQuickstartLedgerService {
     // For backward compatibility (some APIs use ledgerId)
     this.ledgerId = this.participantId;
 
-    // MinimalToken package ID from DAR manifest
-    // Using minimal-token-autoaccept v2.4.0 package with ProposeBurn/AcceptBurn pattern
-    this.minimalTokenPackageId = 'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de';
+    // MinimalToken package ID from centralized config
+    this.minimalTokenPackageId = MINIMAL_TOKEN_PACKAGE_CONFIG.currentPackageId;
 
-    // App Provider party from LocalNet (PARTY_HINT=quickstart-e-1)
+    // App Provider party - fetched dynamically on initialization
     // This is the party with admin rights on App Provider participant
-    this.appProviderParty = 'app_provider_quickstart-e-1::1220a57d93198bc2f795cf3420debe4dc9ec849e4f393158c73753443f86848fa5ad';
+    this.appProviderParty = null;
 
     // Timeout for JSON API calls (30 seconds)
     this.timeout = 30000;
 
-    console.log('🔧 CN Quickstart Ledger Service initialized', {
+    console.log('🔧 CN Quickstart Ledger Service constructed', {
       jsonApiUrl: this.jsonApiUrl,
       participantId: this.participantId.substring(0, 50) + '...',
-      appProviderParty: this.appProviderParty.substring(0, 50) + '...',
       packageId: this.minimalTokenPackageId,
-      timeout: `${this.timeout}ms`
+      timeout: `${this.timeout}ms`,
+      note: 'appProviderParty will be fetched dynamically on first use'
     });
   }
 
@@ -64,7 +64,8 @@ class CNQuickstartLedgerService {
   }
 
   /**
-   * Initialize by fetching App Provider party from CN Quickstart backend
+   * Initialize by fetching App Provider party dynamically from Canton
+   * This is crucial because party IDs change when Canton LocalNet restarts
    */
   async initialize() {
     if (this.appProviderParty) {
@@ -72,36 +73,60 @@ class CNQuickstartLedgerService {
     }
 
     try {
-      // Option 1: Get from CN Quickstart backend API
-      const response = await fetch('http://localhost:8080/admin/tenant-registrations', {
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
+      console.log('🔄 Fetching App Provider party from Canton logs...');
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log('📋 Tenant registrations:', data);
+      // Option 1: Try to get from Canton logs via shell command
+      // This is the most reliable method for LocalNet
+      try {
+        const { execSync } = await import('child_process');
+        const result = execSync(
+          'docker logs canton 2>&1 | grep "app_provider_quickstart-e-1::" | tail -1 | grep -o "app_provider_quickstart-e-1::[a-f0-9]*" | head -1',
+          { encoding: 'utf-8', timeout: 5000 }
+        ).trim();
 
-        // Extract App Provider party from tenant registrations
-        // This is the party that has admin rights
-        if (Array.isArray(data) && data.length > 0) {
-          this.appProviderParty = data[0].party;
-          console.log('✅ Got App Provider party:', this.appProviderParty);
+        if (result && result.startsWith('app_provider_quickstart-e-1::')) {
+          this.appProviderParty = result;
+          console.log('✅ Found App Provider party from logs:', this.appProviderParty);
           return;
         }
+      } catch (logError) {
+        console.log('⚠️  Could not extract from logs, trying API...');
       }
 
-      // Option 2: Use environment variable
+      // Option 2: Try CN Quickstart backend API (requires auth)
+      try {
+        const backendResponse = await fetch('http://localhost:8080/admin/tenant-registrations', {
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+
+        if (backendResponse.ok) {
+          const data = await backendResponse.json();
+          if (Array.isArray(data) && data.length > 0) {
+            this.appProviderParty = data[0].party;
+            console.log('✅ Got App Provider party from backend:', this.appProviderParty);
+            return;
+          }
+        }
+      } catch (backendError) {
+        console.log('⚠️  Backend API not available, trying environment variable...');
+      }
+
+      // Option 3: Use environment variable
       if (process.env.APP_PROVIDER_PARTY) {
         this.appProviderParty = process.env.APP_PROVIDER_PARTY;
         console.log('✅ Using APP_PROVIDER_PARTY from env:', this.appProviderParty);
         return;
       }
 
-      // Option 3: Use shared volume file (if running in Docker)
-      // This is set by splice-onboarding service
-      throw new Error('Could not determine App Provider party. Set APP_PROVIDER_PARTY environment variable.');
+      // Option 4: Extract from Canton logs (last resort)
+      console.error('❌ Could not determine App Provider party automatically');
+      throw new Error(
+        'Could not determine App Provider party. Please:\n' +
+        '1. Set APP_PROVIDER_PARTY environment variable, OR\n' +
+        '2. Check Canton logs: docker logs canton 2>&1 | grep "app_provider_quickstart-e-1::" | tail -1'
+      );
 
     } catch (error) {
       console.error('❌ Failed to initialize:', error.message);
@@ -952,19 +977,8 @@ class CNQuickstartLedgerService {
 
       console.log('🔍 Querying active holdings via JSON API /v2/state/active-contracts...', { owner, instrumentId });
 
-      // Query for Holdings across ALL deployed package versions
-      // v2.0.0: eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de
-      // v2.0.1: 2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118
-      // v2.1.0: c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d
-      // v2.2.0: c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae
-      // v2.4.0: bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de
-      const allPackageIds = [
-        'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de', // v2.4.0 (current - with ProposeBurn/AcceptBurn)
-        // 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae', // v2.2.0 (with Burn)
-        // 'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d', // v2.1.0
-        // '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118', // v2.0.1
-        // 'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'  // v2.0.0
-      ];
+      // Query for Holdings across ALL deployed package versions from centralized config
+      const allPackageIds = Object.values(MINIMAL_TOKEN_PACKAGE_CONFIG.versions);
 
       const holdingTemplateIds = allPackageIds.map(pkgId => `${pkgId}:MinimalToken:Holding`);
 

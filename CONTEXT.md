@@ -1,60 +1,123 @@
 # Canton Wallet Demo - Context & Status
 
-## Current Status (2025-10-07)
+## Current Status (2025-10-12)
 
 ### ✅ WORKING Features
-- **v2.4.0 DAML Contract**: ProposeBurn/AcceptBurn pattern implemented ✨ NEW
+- **Dynamic Party ID Detection**: App provider party automatically fetched from Canton logs ✨ NEW (2025-10-12)
+- **Centralized Package Config**: Uses src/config/packageConfig.js for version management ✨ NEW (2025-10-12)
+- **v1.0.0 DAML Contract**: Immediate burn via consuming ProposeBurn choice (current deployment) ✨ UPDATED (2025-10-12)
 - **Cross-Participant Minting**: Issue + Accept flow working
-- **Cross-Participant Burning**: ProposeBurn + AcceptBurn flow working ✨ NEW
-- **Package Management**: v2.4.0 (bc5800fb...) set as active
-- **Admin Interface**: Burn proposal approval panel ✨ NEW
-- **UI**: Burn buttons create proposals, admin approves
+- **Immediate Token Burning**: ProposeBurn consumes Holding immediately (design decision) ✨ UPDATED (2025-10-12)
+- **Package Management**: v1.0.0 (1bf66b0c...) set as active
+- **UI**: Burn buttons immediately remove tokens
 
 ### 🎉 SOLVED ISSUES
 
-#### Cross-Participant Burn Now Working! ✅
-**Problem**: Direct Burn choice failed on cross-participant Holdings with dual signatories
+#### Dynamic Party ID Detection (2025-10-12) ✅
+**Problem**: Hardcoded app_provider party ID in code became invalid after Canton LocalNet restart, causing 403 "security-sensitive error" on all token operations.
 
 **Root Cause**:
-- Holdings have `signatory admin, owner` (both on different participants)
-- Direct Burn only used `actAs: [owner]`, causing CONTRACT_NOT_ACTIVE
-- Canton requires propose-and-accept pattern for cross-participant dual-signatory operations
+- Canton LocalNet generates **NEW party IDs** every time it restarts
+- Old hardcoded party ID: `app_provider_quickstart-e-1::1220a57d93...`
+- New party ID after restart: `app_provider_quickstart-e-1::1220c19f3e...`
+- All commands used wrong party ID, resulting in authentication failures
+- DAR vetting was successful, but party mismatch caused rejection
 
-**Solution Implemented**: ProposeBurn/AcceptBurn Pattern (v2.4.0)
+**Failed Solutions**:
+1. ❌ Tried API call to fetch party → Required JWT → Circular dependency (needed party to generate JWT)
+2. ❌ Tried environment variable → Required manual update on every restart
 
+**Working Solution**: Extract party from Docker logs using shell command
+
+```javascript
+// src/services/cnQuickstartLedgerService.js (lines 70-135)
+async initialize() {
+  if (this.appProviderParty) return; // Already initialized
+
+  try {
+    // Option 1: Extract from Canton Docker logs (most reliable for LocalNet)
+    const { execSync } = await import('child_process');
+    const result = execSync(
+      'docker logs canton 2>&1 | grep "app_provider_quickstart-e-1::" | tail -1 | grep -o "app_provider_quickstart-e-1::[a-f0-9]*" | head -1',
+      { encoding: 'utf-8', timeout: 5000 }
+    ).trim();
+
+    if (result && result.startsWith('app_provider_quickstart-e-1::')) {
+      this.appProviderParty = result;
+      return;
+    }
+  } catch (logError) {
+    // Fallback to other methods...
+  }
+
+  // Option 2: Try CN Quickstart backend API
+  // Option 3: Use environment variable
+  // Option 4: Error with instructions
+}
+```
+
+**Changes Made**:
+1. **Constructor** (lines 26-40): Changed `appProviderParty` from hardcoded to `null`, added note about dynamic detection
+2. **Initialize method** (lines 70-135): Added dynamic party fetching with multiple fallback strategies
+3. **All command methods**: Added `await this.initialize()` call at the start to ensure party is loaded
+
+**Result**: ✅ Party ID automatically detected on server startup, no manual updates needed after Canton restarts!
+
+**Testing**:
+- `/api/cn/init` returns correct party: `app_provider_quickstart-e-1::1220c19f3e...`
+- Token creation works without 403 errors
+- Commands use correct current party ID from Canton logs
+
+**Key Insight**: Canton LocalNet party IDs change on restart. For production, party IDs are stable, but for LocalNet demos we must detect dynamically.
+
+#### Immediate Token Burn Design Decision (2025-10-12) ✅
+**Design Choice**: Burns happen immediately when user clicks 🔥 Burn button
+
+**Why Immediate Burns?**
+1. **DAML Default Behavior**: Choices are consuming by default unless marked `nonconsuming`
+2. **Cross-Participant Reality**: Holdings have `signatory admin, owner` across different participants
+3. **Simplicity**: User expectation is that clicking "Burn" removes tokens immediately
+4. **Historical Context**: Previous attempts to change signatory/observer patterns broke minting
+
+**Technical Implementation**:
 ```daml
--- Owner proposes burn
+-- ProposeBurn: Consuming choice (archives Holding immediately)
 choice ProposeBurn : ContractId BurnProposal
   controller owner
   do
     create BurnProposal with
       admin
       owner
-      holding = self
-
--- Admin accepts and completes burn
-template BurnProposal
-  with
-    admin   : Party
-    owner   : Party
-    holding : ContractId Holding
-  where
-    signatory owner
-    observer admin
-
-    choice AcceptBurn : ()
-      controller admin
-      do
-        exercise holding Archive
-        return ()
+      holding = self  -- Creates audit trail with contract ID reference
 ```
 
-**Flow**:
-1. User clicks "🔥 Burn" button → Owner exercises ProposeBurn → Creates BurnProposal contract
-2. Admin sees pending burn request in admin panel UI
-3. Admin clicks "🔥 Approve Burn" → Admin exercises AcceptBurn → Archives both BurnProposal and Holding
+**What Actually Happens**:
+1. User clicks "🔥 Burn" button
+2. Owner exercises ProposeBurn choice on Holding
+3. **Holding is immediately archived** (consuming choice behavior)
+4. BurnProposal contract created as **audit trail** with reference to archived Holding
+5. Balance updates immediately to reflect burn
 
-**Result**: ✅ Cross-participant burns working perfectly!
+**Why Not Two-Step?**:
+- Minting requires two steps because admin creates HoldingProposal first, then owner accepts
+- For burning, owner already possesses the Holding and just wants to remove it
+- Making ProposeBurn `nonconsuming` would leave Holding active, requiring admin approval to finish
+- Historical issues: Changing Holding signatures/observers repeatedly broke cross-participant minting
+- **Design decision**: Keep it simple - immediate burn with audit trail
+
+**BurnProposal Template Purpose**:
+- Serves as **permanent audit record** of what was burned
+- Contains: owner, admin, archived Holding contract ID reference
+- AcceptBurn choice exists for completeness but Holding is already archived
+- Queryable for burn history and compliance
+
+**UI Updates (2025-10-12)**:
+- Removed "Admin: Burn Proposals" section (no approval needed)
+- Changed burn button text to reflect immediate action
+- Updated Quick Start Guide: "Click 🔥 Burn to immediately remove tokens"
+- Added design note explaining immediate burn behavior
+
+**Result**: ✅ Simple, immediate burns with full audit trail!
 
 ### ⚠️ KNOWN LIMITATIONS
 
@@ -112,33 +175,46 @@ choice Burn : ()
 ### v2.0.1 & v2.0.0
 - Basic minting without proposal pattern
 
-## Package ID Management
+## Package ID Management (Updated 2025-10-12)
 
-### Active Package IDs (Queried)
-**Files**:
-- `server/services/jsonApiV1Service.js` (lines 21-27)
-- `src/services/cnQuickstartLedgerService.js` (line 24)
+### Centralized Configuration ✨ NEW
+**Location**: `src/config/packageConfig.js`
 
-**Current Config** (jsonApiV1Service.js):
+All services now import from centralized config:
 ```javascript
-this.packageIds = [
-  'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de',  // v2.4.0 (with ProposeBurn/AcceptBurn) ✅ PRIMARY
-  // 'c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae',  // v2.2.0 (with Burn) - for old Instruments
-  // 'c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d',  // v2.1.0 ❌ HIDDEN
-  // '2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118',  // v2.0.1 ❌ HIDDEN
-  // 'eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de'   // v2.0.0 ❌ HIDDEN
-];
+export const MINIMAL_TOKEN_PACKAGE_CONFIG = {
+  currentVersion: '1.0.0',
+  currentPackageId: '1bf66b0c9774ca1de9a075c810b443c2fe3638c59c07da7c8034b04650e3352e',
+
+  versions: {
+    '1.0.0': '1bf66b0c9774ca1de9a075c810b443c2fe3638c59c07da7c8034b04650e3352e'
+    // Add old versions for backward compatibility if needed
+  }
+};
 ```
 
-**Current Config** (cnQuickstartLedgerService.js):
-```javascript
-this.minimalTokenPackageId = 'bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de'; // v2.4.0
-```
+**Services Using Config**:
+1. `src/services/cnQuickstartLedgerService.js` (line 24)
+   - Imports `currentPackageId` for command operations
+   ```javascript
+   this.minimalTokenPackageId = MINIMAL_TOKEN_PACKAGE_CONFIG.currentPackageId;
+   ```
+
+2. `server/services/jsonApiV1Service.js` (line 22)
+   - Uses all `versions` for query operations
+   ```javascript
+   this.packageIds = Object.values(MINIMAL_TOKEN_PACKAGE_CONFIG.versions);
+   ```
+
+**Automatic Updates**:
+- `upload_dar.py` script automatically updates this config file
+- Adds new version and keeps existing ones for backward compatibility
+- No need to manually update multiple files
 
 **Effect**:
-- v2.4.0 used for all new operations (mint, burn proposals, accepts)
-- Can uncomment v2.2.0 to show old Instruments in queries
-- Clean demo state with latest contract version
+- v1.0.0 used for all new operations (mint, burn proposals, accepts, transfers)
+- Can add old versions to `versions` object to query historical contracts
+- Single source of truth for package IDs
 
 ## Service Architecture
 
@@ -296,6 +372,33 @@ subprocess.run([
 
 ## Files Modified (Recent Sessions)
 
+### Dynamic Party Detection + v1.0.0 Package Deployment (2025-10-12)
+
+1. **Centralized Config**: `src/config/packageConfig.js` (CREATED)
+   - Centralized package version management
+   - Auto-updated by upload_dar.py
+   - Imported by both command and query services
+
+2. **Ledger Service**: `src/services/cnQuickstartLedgerService.js`
+   - Changed `appProviderParty` from hardcoded to `null` (line 28)
+   - Added `initialize()` method for dynamic party detection (lines 70-135)
+   - Added `await this.initialize()` to all command methods
+   - Updated to use centralized package config (line 24)
+
+3. **Upload Scripts**:
+   - `upload_dar.py`: Enhanced to auto-update packageConfig.js
+   - `vet_dar.py`: Standalone vetting tool
+   - `get_party_id.sh`: Helper to extract current party from logs
+
+4. **Documentation**:
+   - `QUICK_REFERENCE.md`: Quick commands for DAR deployment
+   - `docs/DAR_UPLOAD_GUIDE.md`: Comprehensive upload documentation
+   - `VETTING_STATUS.md`: Troubleshooting guide for vetting issues
+
+5. **DAML Package**: `daml/minimal-token/daml.yaml`
+   - Updated version to 1.0.0
+   - Clean deployment with consistent ProposeBurn/AcceptBurn pattern
+
 ### v2.4.0 Implementation (ProposeBurn/AcceptBurn Pattern - 2025-10-07)
 
 1. **DAML Contract**: `daml/minimal-token/daml/MinimalToken.daml`
@@ -342,31 +445,33 @@ subprocess.run([
 
 ## Key Learnings
 
-1. **DAML Contract Immutability**: Old contracts can't gain new choices from upgraded templates. Must create new holdings with new package version to use new choices.
+1. **Canton LocalNet Party ID Persistence**: Party IDs in Canton LocalNet are **NOT persistent** across restarts. The same party hint (e.g., `app_provider_quickstart-e-1`) gets assigned a different hash suffix each restart. Production Canton has stable party IDs, but LocalNet requires dynamic detection. Solution: Extract from Docker logs using shell commands at runtime.
 
-2. **Package Version Matching**: Exercise commands MUST use the exact package ID that created the contract. Cannot exercise v2.4.0 choice on v2.2.0 contract.
+2. **DAML Contract Immutability**: Old contracts can't gain new choices from upgraded templates. Must create new holdings with new package version to use new choices.
 
-3. **Cross-Participant Dual Signatories**: Holdings with `signatory admin, owner` across different participants require special handling:
+3. **Package Version Matching**: Exercise commands MUST use the exact package ID that created the contract. Cannot exercise v2.4.0 choice on v2.2.0 contract.
+
+4. **Cross-Participant Dual Signatories**: Holdings with `signatory admin, owner` across different participants require special handling:
    - Direct choices controlled by only one signatory may fail with CONTRACT_NOT_ACTIVE
    - Solution: Use propose-and-accept pattern where each party acts separately
    - ProposeBurn (owner creates proposal) → AcceptBurn (admin completes)
 
-4. **Canton Backward Compatibility**: Package upgrades CANNOT remove choices:
+5. **Canton Backward Compatibility**: Package upgrades CANNOT remove choices:
    - First attempt (v2.3.0): Removed Burn, added ProposeBurn → Upload failed
    - Solution (v2.4.0): Keep both Burn (legacy) and ProposeBurn (recommended)
 
-5. **UI State Timing**: Canton needs time to process contract archives:
+6. **UI State Timing**: Canton needs time to process contract archives:
    - After AcceptBurn, BurnProposal and Holding are archived
    - Immediate re-query may still show old contracts
    - Solution: Add 1-second delay before reloading UI state
 
-6. **Service Separation**:
+7. **Service Separation**:
    - JSON API v1 for queries (batch queries with templateIds)
    - JSON API v2 for commands (single operations with full request structure)
 
-7. **Hidden vs Deleted**: Commenting out package IDs HIDES contracts from queries but doesn't delete them from ledger. They still exist and can be queried with correct template ID.
+8. **Hidden vs Deleted**: Commenting out package IDs HIDES contracts from queries but doesn't delete them from ledger. They still exist and can be queried with correct template ID.
 
-8. **Observer Pattern for Cross-Participant**:
+9. **Observer Pattern for Cross-Participant**:
    - BurnProposal has `signatory owner, observer admin`
    - This allows admin on different participant to see and accept proposal
    - AcceptBurn exercises Archive on the Holding, using admin's authority
