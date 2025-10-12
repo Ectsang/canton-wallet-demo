@@ -31,11 +31,11 @@ cd daml/minimal-token
 daml build
 cd ../..
 
-# Upload and vet (automatic)
-python3 upload_dar.py 1.0.0
+# Upload and vet (automatic - auto-detects version!)
+./scripts/upload_dar.sh
 ```
 
-**What happens:** Script uploads DAR to both participants, vets it, and updates package config automatically.
+**What happens:** Script auto-detects version from daml.yaml, uploads DAR to both participants, vets it, and updates package config automatically.
 
 ---
 
@@ -57,7 +57,7 @@ npm run server:start
 npm run dev
 ```
 
-Open http://localhost:5174 in your browser.
+Open <http://localhost:5174> in your browser.
 
 ---
 
@@ -80,23 +80,27 @@ Follow the UI instructions:
 
 ## What's Happening Behind the Scenes?
 
-### When you create a wallet:
+### When you create a wallet
+
 - Backend generates Ed25519 key pair
 - Enables party on Canton's app-user participant
 - Grants JWT authentication rights
 - Returns your unique Party ID
 
-### When you create a token:
+### When you create a token
+
 - Creates real **Instrument contract** on Canton ledger
 - Admin (app_provider) is the owner
 - Contract stores name, symbol, decimals
 
-### When you mint tokens:
+### When you mint tokens
+
 - **Step 1 (Issue):** Admin creates HoldingProposal contract
 - **Step 2 (Accept):** You accept, creates Holding contract with tokens
 - Why 2 steps? Admin and your wallet are on **different Canton participants**
 
-### When you burn tokens:
+### When you burn tokens
+
 - **Step 1 (ProposeBurn):** You propose to burn a Holding
 - **Step 2 (AcceptBurn):** Admin approves, archives both contracts
 - Why 2 steps? Holding has dual signatories (admin + you)
@@ -106,12 +110,15 @@ Follow the UI instructions:
 ## Troubleshooting
 
 ### "403 security-sensitive error"
+
 - **Fix:** Re-run `python3 upload_dar.py 1.0.0` (vets the package)
 
 ### "Party not found" / "Connection failed"
+
 - **Fix:** Restart backend (it will auto-detect new party ID)
 
 ### Tokens not showing
+
 - **Fix:** Check that Canton LocalNet is running on correct ports (3975, 2975)
 
 ---

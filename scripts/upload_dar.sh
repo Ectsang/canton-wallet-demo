@@ -128,9 +128,9 @@ EOF
 # Extract package ID from upload response
 extract_package_id() {
     local response=$1
-    # Extract first darId from JSON response
-    echo "$response" | grep -o '"darIds":\s*\["[^"]*"' | \
-        grep -o '[a-f0-9]\{64\}' | head -1
+    # Extract JSON portion - strip color codes and get the JSON block
+    # Use awk to find lines between { and } inclusive
+    echo "$response" | sed 's/\x1b\[[0-9;]*m//g' | awk '/^{/,/^}/' | jq -r '.darIds[0] // empty'
 }
 
 # Update package configuration
@@ -142,29 +142,32 @@ update_package_config() {
     log_info "📝 Updating package configuration: $CONFIG_FILE"
 
     # Read existing config if it exists
-    local versions_block=""
+    local versions_entries=()
     if [ -f "$CONFIG_FILE" ]; then
-        # Extract existing versions
-        versions_block=$(grep -oP "versions:\s*\{[^}]*\}" "$CONFIG_FILE" | \
-            grep -oP "'[^']+'\s*:\s*'[^']+'" || echo "")
+        # Extract existing version entries using sed (macOS compatible)
+        while IFS= read -r line; do
+            if [[ "$line" =~ \'([^\']+)\':[[:space:]]*\'([^\']+)\' ]]; then
+                local v="${BASH_REMATCH[1]}"
+                local pid="${BASH_REMATCH[2]}"
+                if [ "$v" != "$version" ]; then
+                    versions_entries+=("$v:$pid")
+                fi
+            fi
+        done < "$CONFIG_FILE"
     fi
 
-    # Add new version to the block
-    if [ -n "$versions_block" ]; then
-        versions_block="${versions_block}\n    '${version}': '${package_id}'"
-    else
-        versions_block="'${version}': '${package_id}'"
-    fi
-
-    # Remove duplicates and sort (newest first)
-    versions_block=$(echo -e "$versions_block" | \
-        awk '!seen[$0]++' | \
-        sort -r -t: -k1)
+    # Add new version at the beginning (newest first)
+    versions_entries=("$version:$package_id" "${versions_entries[@]}")
 
     # Format for JS object
-    versions_formatted=$(echo -e "$versions_block" | \
-        awk '{printf "    %s", $0; if(NR<line_count) printf ",\n"}' \
-        line_count=$(echo -e "$versions_block" | wc -l))
+    local versions_formatted=""
+    for i in "${!versions_entries[@]}"; do
+        IFS=: read -r v pid <<< "${versions_entries[$i]}"
+        versions_formatted+="    '${v}': '${pid}'"
+        if [ $i -lt $((${#versions_entries[@]} - 1)) ]; then
+            versions_formatted+=",\n"
+        fi
+    done
 
     # Create new config file
     cat > "$CONFIG_FILE" <<EOF
@@ -178,7 +181,7 @@ export const MINIMAL_TOKEN_PACKAGE_CONFIG = {
 
   // All deployed versions (newest first)
   versions: {
-${versions_formatted}
+$(echo -e "$versions_formatted")
   }
 };
 

@@ -5,12 +5,14 @@ Complete guide for building, uploading, and deploying DAML contracts to Canton L
 ## Quick Reference
 
 ### One-Command Deploy
+
 ```bash
 # Build and upload new version (auto-detects version from daml.yaml)
 cd daml/minimal-token && daml build && cd ../.. && ./scripts/upload_dar.sh
 ```
 
 ### Step-by-Step Deploy
+
 ```bash
 # 1. Update version in daml.yaml
 vim daml/minimal-token/daml.yaml
@@ -35,7 +37,8 @@ npm run server:start
 
 1. Canton LocalNet running (cn-quickstart)
 2. `grpcurl` installed (`brew install grpcurl` on macOS)
-3. Python 3 installed (for Python upload script alternative)
+3. `jq` installed (`brew install jq` on macOS) - for shell script JSON parsing
+4. Python 3 + PyYAML (optional, only if using Python upload script)
 
 ## File Locations
 
@@ -62,19 +65,35 @@ This creates a `.dar` file in `.daml/dist/minimal-token-<version>.dar`
 ## Uploading the DAR
 
 ### Recommended: Shell Script (Auto-detects Version)
+
 ```bash
 ./scripts/upload_dar.sh
 ```
 
-### Alternative: Python Script (Specify Version)
-```bash
-python3 ./scripts/upload_dar.py <version>
-```
+**Why use this?**
 
-Example:
+- ✅ Auto-detects version from daml.yaml (no arguments needed)
+- ✅ No Python dependencies required
+- ✅ Faster and simpler
+
+**Requirements:** `grpcurl` and `jq` (install via `brew install grpcurl jq`)
+
+### Alternative: Python Script
+
 ```bash
+# Auto-detect version from daml.yaml
+python3 ./scripts/upload_dar.py
+
+# Or specify version explicitly
 python3 ./scripts/upload_dar.py 1.0.0
 ```
+
+**Why use this?**
+
+- When you prefer Python
+- Already have Python environment set up
+
+**Requirements:** Python 3, `grpcurl`, PyYAML (`pip install pyyaml`)
 
 ### What the Script Does
 
@@ -158,11 +177,12 @@ grpcurl -plaintext localhost:3902 com.digitalasset.canton.admin.participant.v30.
 grpcurl -plaintext localhost:2902 com.digitalasset.canton.admin.participant.v30.PackageService/ListPackages
 ```
 
-## Important: Party IDs Change on Canton Restart!
+## Important: Party IDs Change on Canton Restart
 
 **Canton LocalNet generates NEW party IDs every time it restarts.** The backend now fetches the party ID **dynamically** on initialization.
 
 If you need the current party ID for debugging:
+
 ```bash
 ./get_party_id.sh
 ```
@@ -188,31 +208,38 @@ python3 ./scripts/vet_dar.py 1bf66b0c9774ca1de9a075c810b443c2fe3638c59c07da7c803
 ### Common Vetting Issues
 
 **Error: "security-sensitive error" (403)**
+
 - **Cause**: DAR was uploaded but not vetted
 - **Solution**: Run `python3 ./scripts/vet_dar.py <package-id>`
 
 **Error: Package not found**
+
 - **Cause**: DAR not uploaded to participant
 - **Solution**: Re-run `./scripts/upload_dar.sh` or `python3 ./scripts/upload_dar.py <version>`
 
 ## Troubleshooting
 
 ### "DAR file not found"
+
 - Make sure you ran `daml build` first
 - Check that the version matches the one in `daml/minimal-token/daml.yaml`
 
-### "grpcurl not found"
+### "grpcurl not found" or "jq not found"
+
 ```bash
-brew install grpcurl  # macOS
+brew install grpcurl jq  # macOS
 # or
 go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest  # Go
+# jq: https://stedolan.github.io/jq/download/
 ```
 
 ### "Connection refused"
+
 - Make sure Canton LocalNet is running
 - Check that ports 3902 and 2902 are accessible
 
 ### Package ID not updating in services
+
 - The config file should be automatically imported
 - Check that imports use the correct relative path
 - Restart the backend server after updating the config
