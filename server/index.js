@@ -7,7 +7,6 @@ import dotenv from 'dotenv'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import initRoutes from './routes/init.js'
-import damlRoutes from './routes/daml.js'
 import cnQuickstartRoutes from './routes/cnQuickstartRoutes.js'
 import sdkManager from './sdkManager.js'
 
@@ -59,7 +58,6 @@ await app.register(fastifyStatic, {
 sdkManager.setLogger(app.log)
 
 await initRoutes(app)
-await damlRoutes(app)
 await cnQuickstartRoutes(app)
 
 app.get('/api/health', async (req, reply) => {

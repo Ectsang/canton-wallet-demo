@@ -7,14 +7,9 @@
 
 import CNQuickstartLedgerService from '../../src/services/cnQuickstartLedgerService.js';
 import JsonApiV1Service from '../services/jsonApiV1Service.js';
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
-const CNQuickstartGrpcBalanceService = require('../../src/services/cnQuickstartGrpcBalanceService.cjs');
 
 // Singleton service instances
 let ledgerService = null;
-let grpcBalanceService = null;
 let jsonApiV1Service = null;
 
 function getLedgerService() {
@@ -22,13 +17,6 @@ function getLedgerService() {
     ledgerService = new CNQuickstartLedgerService();
   }
   return ledgerService;
-}
-
-function getGrpcBalanceService() {
-  if (!grpcBalanceService) {
-    grpcBalanceService = new CNQuickstartGrpcBalanceService();
-  }
-  return grpcBalanceService;
 }
 
 function getJsonApiV1Service() {

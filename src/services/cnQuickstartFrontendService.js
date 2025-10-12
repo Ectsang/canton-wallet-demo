@@ -7,7 +7,6 @@ class CNQuickstartFrontendService {
   constructor() {
     this.baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8899';
     this.apiPrefix = '/api/cn';
-    this.damlApiPrefix = '/api/daml';
     this.isInitialized = false;
     this.appProviderParty = null;
   }
