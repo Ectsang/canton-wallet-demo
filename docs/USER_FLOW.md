@@ -744,7 +744,5 @@ Canton automatically shares contracts to observers:
 
 ### Documentation
 
-- `QUICK_REFERENCE.md` - Quick commands
-- `docs/DAR_UPLOAD_GUIDE.md` - Detailed upload guide
-- `VETTING_STATUS.md` - Vetting troubleshooting
+- `docs/DAR_UPLOAD_GUIDE.md` - Complete deployment guide with quick commands
 - `CONTEXT.md` - Technical context and history

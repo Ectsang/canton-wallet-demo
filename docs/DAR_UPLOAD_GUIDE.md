@@ -1,12 +1,52 @@
-# DAR Upload Guide
+# DAR Upload & Deployment Guide
 
-This guide explains how to build and upload DAML contracts to Canton LocalNet.
+Complete guide for building, uploading, and deploying DAML contracts to Canton LocalNet.
+
+## Quick Reference
+
+### One-Command Deploy
+```bash
+# Build and upload new version (auto-detects version from daml.yaml)
+cd daml/minimal-token && daml build && cd ../.. && ./scripts/upload_dar.sh
+```
+
+### Step-by-Step Deploy
+```bash
+# 1. Update version in daml.yaml
+vim daml/minimal-token/daml.yaml
+
+# 2. Build
+cd daml/minimal-token
+daml clean && daml build
+
+# 3. Upload (from project root - auto-detects version!)
+cd ../..
+./scripts/upload_dar.sh
+
+# 4. Verify
+cat src/config/packageConfig.js
+
+# 5. Restart server
+npm run server:stop
+npm run server:start
+```
 
 ## Prerequisites
 
 1. Canton LocalNet running (cn-quickstart)
 2. `grpcurl` installed (`brew install grpcurl` on macOS)
-3. Python 3 installed
+3. Python 3 installed (for Python upload script alternative)
+
+## File Locations
+
+```text
+scripts/upload_dar.sh                # Upload & vet script (shell, auto-detects version)
+scripts/upload_dar.py                # Python alternative (requires PyYAML)
+scripts/vet_dar.py                   # Standalone vetting script for existing packages
+src/config/packageConfig.js          # Centralized package config (auto-updated)
+daml/minimal-token/daml.yaml         # DAML version definition
+docs/DAR_UPLOAD_GUIDE.md             # This documentation
+```
 
 ## Building the DAML Contract
 
@@ -21,15 +61,19 @@ This creates a `.dar` file in `.daml/dist/minimal-token-<version>.dar`
 
 ## Uploading the DAR
 
-Use the automated upload script from the project root:
-
+### Recommended: Shell Script (Auto-detects Version)
 ```bash
-python3 upload_dar.py <version>
+./scripts/upload_dar.sh
+```
+
+### Alternative: Python Script (Specify Version)
+```bash
+python3 ./scripts/upload_dar.py <version>
 ```
 
 Example:
 ```bash
-python3 upload_dar.py 1.0.0
+python3 ./scripts/upload_dar.py 1.0.0
 ```
 
 ### What the Script Does
@@ -106,13 +150,21 @@ Then manually update `src/config/packageConfig.js` with the returned package ID.
 Check that the package was uploaded successfully:
 
 ```bash
-# Query app-provider packages
-grpcurl -plaintext localhost:3902 \
-  com.digitalasset.canton.admin.participant.v30.PackageService/ListPackages
+# Check config
+node -e "import('./src/config/packageConfig.js').then(m => console.log(m.default))"
 
-# Query app-user packages
-grpcurl -plaintext localhost:2902 \
-  com.digitalasset.canton.admin.participant.v30.PackageService/ListPackages
+# Check Canton participants
+grpcurl -plaintext localhost:3902 com.digitalasset.canton.admin.participant.v30.PackageService/ListPackages
+grpcurl -plaintext localhost:2902 com.digitalasset.canton.admin.participant.v30.PackageService/ListPackages
+```
+
+## Important: Party IDs Change on Canton Restart!
+
+**Canton LocalNet generates NEW party IDs every time it restarts.** The backend now fetches the party ID **dynamically** on initialization.
+
+If you need the current party ID for debugging:
+```bash
+./get_party_id.sh
 ```
 
 ## What is DAR Vetting?
@@ -126,18 +178,22 @@ grpcurl -plaintext localhost:2902 \
 The `upload_dar.py` script automatically vets the DAR after uploading. If you need to vet an existing package:
 
 ```bash
-python3 vet_dar.py <package-id>
+# Vet a specific package
+python3 ./scripts/vet_dar.py <package-id>
+
+# Example
+python3 ./scripts/vet_dar.py 1bf66b0c9774ca1de9a075c810b443c2fe3638c59c07da7c8034b04650e3352e
 ```
 
 ### Common Vetting Issues
 
 **Error: "security-sensitive error" (403)**
 - **Cause**: DAR was uploaded but not vetted
-- **Solution**: Run `python3 vet_dar.py <package-id>`
+- **Solution**: Run `python3 ./scripts/vet_dar.py <package-id>`
 
 **Error: Package not found**
 - **Cause**: DAR not uploaded to participant
-- **Solution**: Re-run `python3 upload_dar.py <version>`
+- **Solution**: Re-run `./scripts/upload_dar.sh` or `python3 ./scripts/upload_dar.py <version>`
 
 ## Troubleshooting
 
@@ -167,11 +223,25 @@ When upgrading DAML contracts:
 
 1. **Update version** in `daml/minimal-token/daml.yaml`
 2. **Run `daml build`**
-3. **Run `python3 upload_dar.py <new-version>`**
-4. **Test the application** with the new version
-5. **Keep old versions** in config if you need backward compatibility
+3. **Run `./scripts/upload_dar.sh`** (auto-detects) or `python3 ./scripts/upload_dar.py <new-version>`
+4. **Verify config** with `cat src/config/packageConfig.js`
+5. **Restart server** with `npm run server:stop && npm run server:start`
+6. **Test the application** with the new version
 
 The script preserves all previous versions in the config, so old contracts remain queryable.
+
+## Configuration Used By
+
+- `src/services/cnQuickstartLedgerService.js` - Commands use currentPackageId
+- `server/services/jsonApiV1Service.js` - Queries use all versions
+
+## Current Deployment
+
+- **Version:** 1.0.0
+- **Package ID:** `1bf66b0c9774ca1de9a075c810b443c2fe3638c59c07da7c8034b04650e3352e`
+- **Uploaded:** 2025-10-12
+- **Status:** ✅ Active
+- **Party Discovery:** ✅ Automatic
 
 ## Package ID Reference
 
@@ -186,7 +256,9 @@ For reference, here are the package IDs used in this project:
 
 ## Related Files
 
-- `upload_dar.py` - Automated upload script
+- `scripts/upload_dar.sh` - Shell upload script (recommended, auto-detects version)
+- `scripts/upload_dar.py` - Python upload script alternative
+- `scripts/vet_dar.py` - Standalone vetting tool
 - `src/config/packageConfig.js` - Centralized package configuration
 - `daml/minimal-token/daml.yaml` - DAML project version
 - `CONTEXT.md` - Full project context and architecture

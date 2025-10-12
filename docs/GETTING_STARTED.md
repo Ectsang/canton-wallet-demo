@@ -137,8 +137,8 @@ Follow the UI instructions:
 ## Next Steps
 
 - Read [USER_FLOW.md](./USER_FLOW.md) for detailed step-by-step explanation
-- Read [CONTEXT.md](./CONTEXT.md) for technical details and architecture
-- Read [QUICK_REFERENCE.md](./QUICK_REFERENCE.md) for quick commands
+- Read [CONTEXT.md](../CONTEXT.md) for technical details and architecture
+- Read [DAR_UPLOAD_GUIDE.md](./DAR_UPLOAD_GUIDE.md) for deployment and quick commands
 
 ---
 

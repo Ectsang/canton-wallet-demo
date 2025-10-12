@@ -391,9 +391,7 @@ subprocess.run([
    - `get_party_id.sh`: Helper to extract current party from logs
 
 4. **Documentation**:
-   - `QUICK_REFERENCE.md`: Quick commands for DAR deployment
-   - `docs/DAR_UPLOAD_GUIDE.md`: Comprehensive upload documentation
-   - `VETTING_STATUS.md`: Troubleshooting guide for vetting issues
+   - `docs/DAR_UPLOAD_GUIDE.md`: Complete deployment guide with quick commands and troubleshooting
 
 5. **DAML Package**: `daml/minimal-token/daml.yaml`
    - Updated version to 1.0.0
