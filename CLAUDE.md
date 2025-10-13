@@ -52,9 +52,6 @@ npm run build
 
 # Preview production build
 npm run preview
-
-# Build DAML contracts (if modified)
-npm run daml:build
 ```
 
 ### Server Management

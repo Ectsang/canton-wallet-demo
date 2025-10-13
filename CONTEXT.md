@@ -1,9 +1,11 @@
 # Canton Wallet Demo - Context & Status
 
-## Current Status (2025-10-12)
+## Current Status (2025-10-13)
 
 ### ✅ WORKING Features
-- **Dynamic Party ID Detection**: App provider party automatically fetched from Canton logs ✨ NEW (2025-10-12)
+
+- **Automated Wallet Creation**: One-click party allocation via JSON Ledger API v2 + gRPC User Management ✨ NEW (2025-10-13)
+- **Dynamic Party ID Detection**: App provider party automatically fetched via gRPC Ledger API ✨ UPDATED (2025-10-13)
 - **Centralized Package Config**: Uses src/config/packageConfig.js for version management ✨ NEW (2025-10-12)
 - **v1.0.0 DAML Contract**: Immediate burn via consuming ProposeBurn choice (current deployment) ✨ UPDATED (2025-10-12)
 - **Cross-Participant Minting**: Issue + Accept flow working
@@ -14,9 +16,11 @@
 ### 🎉 SOLVED ISSUES
 
 #### Dynamic Party ID Detection (2025-10-12) ✅
+
 **Problem**: Hardcoded app_provider party ID in code became invalid after Canton LocalNet restart, causing 403 "security-sensitive error" on all token operations.
 
 **Root Cause**:
+
 - Canton LocalNet generates **NEW party IDs** every time it restarts
 - Old hardcoded party ID: `app_provider_quickstart-e-1::1220a57d93...`
 - New party ID after restart: `app_provider_quickstart-e-1::1220c19f3e...`
@@ -24,6 +28,7 @@
 - DAR vetting was successful, but party mismatch caused rejection
 
 **Failed Solutions**:
+
 1. ❌ Tried API call to fetch party → Required JWT → Circular dependency (needed party to generate JWT)
 2. ❌ Tried environment variable → Required manual update on every restart
 
@@ -57,6 +62,7 @@ async initialize() {
 ```
 
 **Changes Made**:
+
 1. **Constructor** (lines 26-40): Changed `appProviderParty` from hardcoded to `null`, added note about dynamic detection
 2. **Initialize method** (lines 70-135): Added dynamic party fetching with multiple fallback strategies
 3. **All command methods**: Added `await this.initialize()` call at the start to ensure party is loaded
@@ -64,22 +70,101 @@ async initialize() {
 **Result**: ✅ Party ID automatically detected on server startup, no manual updates needed after Canton restarts!
 
 **Testing**:
+
 - `/api/cn/init` returns correct party: `app_provider_quickstart-e-1::1220c19f3e...`
 - Token creation works without 403 errors
 - Commands use correct current party ID from Canton logs
 
 **Key Insight**: Canton LocalNet party IDs change on restart. For production, party IDs are stable, but for LocalNet demos we must detect dynamically.
 
+#### Automated Wallet Creation (2025-10-13) ✅
+
+**Feature**: One-click external wallet creation with automatic party allocation and rights management
+
+**Problem**: Users had to manually use Canton console to create wallets, which required:
+
+- Access to Canton console container
+- Knowledge of Scala syntax
+- Multiple commands to enable party, grant actAs rights, grant readAs rights
+- Copy-paste party ID to frontend
+
+**Solution**: Implemented automated wallet creation using Canton's JSON Ledger API v2 and gRPC User Management Service
+
+**Implementation** (`server/routes/cnQuickstartRoutes.js:875-987`):
+
+```javascript
+// POST /api/cn/wallets/create
+// Step 1: Allocate party via JSON Ledger API
+POST http://localhost:2975/v2/parties
+{
+  "partyIdHint": "demo-wallet-1",
+  "identityProviderId": ""
+}
+// Returns: demo-wallet-1::1220857149b7bedd72efd6b51720089b909c682ead71e19290e742a4a2e30f12dd8c
+
+// Step 2: Grant actAs rights via gRPC User Management Service
+grpcurl -H "Authorization: Bearer $TOKEN" -d '{
+  "user_id": "ledger-api-user",
+  "rights": [{"can_act_as": {"party": "demo-wallet-1::1220..."}}]
+}' localhost:2901 com.daml.ledger.api.v2.admin.UserManagementService/GrantUserRights
+
+// Step 3: Grant readAs rights for admin party (for cross-participant operations)
+grpcurl -H "Authorization: Bearer $TOKEN" -d '{
+  "user_id": "ledger-api-user",
+  "rights": [{"can_read_as": {"party": "app_provider_quickstart-e-1::1220..."}}]
+}' localhost:2901 com.daml.ledger.api.v2.admin.UserManagementService/GrantUserRights
+```
+
+**Frontend** (`src/App.jsx:739-811`):
+
+- Green "Automated Wallet Creation" section (recommended approach)
+- Party hint input field for naming wallets
+- "Create External Wallet" button
+- Alternative manual entry option for existing parties
+
+**Flow**:
+
+1. User enters party hint: `demo-wallet-1`
+2. User clicks "Create External Wallet"
+3. Frontend calls `POST /api/cn/wallets/create`
+4. Backend automatically:
+   - Allocates party on app-user participant via JSON API
+   - Grants actAs rights via gRPC
+   - Grants readAs rights for admin party via gRPC
+   - Returns complete wallet info
+5. Frontend saves wallet to localStorage
+6. User can immediately create tokens and mint
+
+**Benefits**:
+
+- ✅ No Canton console access required
+- ✅ No manual commands or Scala knowledge needed
+- ✅ One click instead of 5+ manual commands
+- ✅ Automatic rights management
+- ✅ Works on first startup (no party ID persistence issues)
+- ✅ Alternative manual entry still available for advanced users
+
+**Testing Script** (`scripts/create_wallet.sh`):
+
+- Standalone script for testing party allocation
+- Can be run independently: `./scripts/create_wallet.sh demo-wallet-1`
+- See `scripts/README.md` for full documentation
+
+**Result**: ✅ Users can create fully functional wallets in one click!
+
 #### Immediate Token Burn Design Decision (2025-10-12) ✅
+
 **Design Choice**: Burns happen immediately when user clicks 🔥 Burn button
 
 **Why Immediate Burns?**
+
 1. **DAML Default Behavior**: Choices are consuming by default unless marked `nonconsuming`
 2. **Cross-Participant Reality**: Holdings have `signatory admin, owner` across different participants
 3. **Simplicity**: User expectation is that clicking "Burn" removes tokens immediately
 4. **Historical Context**: Previous attempts to change signatory/observer patterns broke minting
 
 **Technical Implementation**:
+
 ```daml
 -- ProposeBurn: Consuming choice (archives Holding immediately)
 choice ProposeBurn : ContractId BurnProposal
@@ -92,6 +177,7 @@ choice ProposeBurn : ContractId BurnProposal
 ```
 
 **What Actually Happens**:
+
 1. User clicks "🔥 Burn" button
 2. Owner exercises ProposeBurn choice on Holding
 3. **Holding is immediately archived** (consuming choice behavior)
@@ -99,6 +185,7 @@ choice ProposeBurn : ContractId BurnProposal
 5. Balance updates immediately to reflect burn
 
 **Why Not Two-Step?**:
+
 - Minting requires two steps because admin creates HoldingProposal first, then owner accepts
 - For burning, owner already possesses the Holding and just wants to remove it
 - Making ProposeBurn `nonconsuming` would leave Holding active, requiring admin approval to finish
@@ -106,12 +193,14 @@ choice ProposeBurn : ContractId BurnProposal
 - **Design decision**: Keep it simple - immediate burn with audit trail
 
 **BurnProposal Template Purpose**:
+
 - Serves as **permanent audit record** of what was burned
 - Contains: owner, admin, archived Holding contract ID reference
 - AcceptBurn choice exists for completeness but Holding is already archived
 - Queryable for burn history and compliance
 
 **UI Updates (2025-10-12)**:
+
 - Removed "Admin: Burn Proposals" section (no approval needed)
 - Changed burn button text to reflect immediate action
 - Updated Quick Start Guide: "Click 🔥 Burn to immediately remove tokens"
@@ -122,11 +211,13 @@ choice ProposeBurn : ContractId BurnProposal
 ### ⚠️ KNOWN LIMITATIONS
 
 #### Legacy Burn Choice May Not Work
+
 The direct `Burn` choice is kept for backward compatibility but may fail on cross-participant Holdings. Use ProposeBurn/AcceptBurn instead.
 
 ## DAML Contract Evolution
 
 ### v2.4.0 (Current - bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de) ✨ NEW
+
 **Added**: ProposeBurn/AcceptBurn pattern + kept legacy Burn
 
 ```daml
@@ -155,6 +246,7 @@ choice Burn : ()
 ```
 
 **Features**:
+
 - ✅ Issue choice (admin → creates HoldingProposal)
 - ✅ Accept choice (owner → creates Holding from proposal)
 - ✅ Transfer choice (owner → transfer tokens)
@@ -163,24 +255,30 @@ choice Burn : ()
 - ⚠️ Burn choice (legacy, may fail cross-participant)
 
 ### v2.2.0 (c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae)
+
 **Added**: Direct Burn choice (superseded by ProposeBurn)
 
 **Features**:
+
 - ✅ Issue, Accept, Transfer
 - ⚠️ Burn (fails on cross-participant Holdings)
 
 ### v2.1.0 (c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d)
+
 - Issue, Accept, Transfer only (no Burn)
 
 ### v2.0.1 & v2.0.0
+
 - Basic minting without proposal pattern
 
 ## Package ID Management (Updated 2025-10-12)
 
 ### Centralized Configuration ✨ NEW
+
 **Location**: `src/config/packageConfig.js`
 
 All services now import from centralized config:
+
 ```javascript
 export const MINIMAL_TOKEN_PACKAGE_CONFIG = {
   currentVersion: '1.0.0',
@@ -194,24 +292,29 @@ export const MINIMAL_TOKEN_PACKAGE_CONFIG = {
 ```
 
 **Services Using Config**:
+
 1. `src/services/cnQuickstartLedgerService.js` (line 24)
    - Imports `currentPackageId` for command operations
+
    ```javascript
    this.minimalTokenPackageId = MINIMAL_TOKEN_PACKAGE_CONFIG.currentPackageId;
    ```
 
 2. `server/services/jsonApiV1Service.js` (line 22)
    - Uses all `versions` for query operations
+
    ```javascript
    this.packageIds = Object.values(MINIMAL_TOKEN_PACKAGE_CONFIG.versions);
    ```
 
 **Automatic Updates**:
+
 - `upload_dar.py` script automatically updates this config file
 - Adds new version and keeps existing ones for backward compatibility
 - No need to manually update multiple files
 
 **Effect**:
+
 - v1.0.0 used for all new operations (mint, burn proposals, accepts, transfers)
 - Can add old versions to `versions` object to query historical contracts
 - Single source of truth for package IDs
@@ -219,6 +322,7 @@ export const MINIMAL_TOKEN_PACKAGE_CONFIG = {
 ## Service Architecture
 
 ### Actually Used Services ✅
+
 1. **CNQuickstartLedgerService** (`src/services/cnQuickstartLedgerService.js`)
    - **Purpose**: Execute commands (Issue, Accept, ProposeBurn, AcceptBurn, Transfer) via JSON API v2
    - **Used By**: All POST endpoints in `server/routes/cnQuickstartRoutes.js`
@@ -230,6 +334,7 @@ export const MINIMAL_TOKEN_PACKAGE_CONFIG = {
    - **Methods**: queryHoldings(), queryProposals(), queryBurnProposals(), queryInstruments()
 
 ### NOT Used Services ❌
+
 - CNQuickstartGrpcBalanceService (imported but never called)
 - grpcLedgerService.js (not imported)
 - cantonConsoleService.js (not used in API)
@@ -238,10 +343,12 @@ export const MINIMAL_TOKEN_PACKAGE_CONFIG = {
 ## Frontend Integration
 
 **Main Service**: `CNQuickstartFrontendService` (`src/services/cnQuickstartFrontendService.js`)
+
 - Calls backend API endpoints
 - Methods: initialize, createToken, mintTokens, getProposals, acceptProposal, proposeBurnHolding, acceptBurnProposal, queryBurnProposals, transferHolding, getTokenBalance
 
 **UI State**: `src/App.jsx`
+
 - Added `appProviderParty` state (line 17)
 - Added `burnProposals` state (line 41)
 - Set via `setAppProviderParty(initResult.appProviderParty)` on init (line 55)
@@ -251,21 +358,25 @@ export const MINIMAL_TOKEN_PACKAGE_CONFIG = {
 ## Transfer Feature Implementation
 
 ### Purpose
+
 Allow users to transfer old v2.0.x/v2.1.0 holdings back to admin to "clean up" holdings that can't be burned.
 
 ### Implementation
 
 **Backend**:
+
 - Endpoint: `POST /api/cn/holdings/transfer` (cnQuickstartRoutes.js:370-447)
 - Service Method: `CNQuickstartLedgerService.transferHolding()` (cnQuickstartLedgerService.js:622-729)
 - Choice: `Transfer` (exists in all DAML versions)
 
 **Frontend**:
+
 - Service Method: `CNQuickstartFrontendService.transferHolding()` (cnQuickstartFrontendService.js:306-344)
 - UI Function: `transferToAdmin()` in App.jsx (lines 386-411)
 - Button: "↩️ Transfer" next to Burn button (App.jsx:1082-1097)
 
 **Flow**:
+
 1. User clicks "↩️ Transfer" button on a holding
 2. Frontend calls `transferToAdmin(holdingId, amount, symbol)`
 3. Transfers full amount to `appProviderParty` (admin)
@@ -275,6 +386,7 @@ Allow users to transfer old v2.0.x/v2.1.0 holdings back to admin to "clean up" h
 ## Known Working Flows
 
 ### 1. Cross-Participant Two-Step Minting ✅
+
 ```
 Admin (app-provider) → Issue choice → HoldingProposal created
 Owner (app-user) → Accept choice → Holding created
@@ -282,12 +394,14 @@ Result: 1000 tokens in owner's balance
 ```
 
 **Verified**: 2025-10-06 (v2.2.0)
+
 - Proposal created successfully
 - Proposal accepted successfully
 - Holding created with both admin and owner as signatories
 - Balance query shows tokens
 
 ### 2. Cross-Participant Two-Step Burning ✅
+
 ```
 Owner (app-user) → ProposeBurn choice → BurnProposal created
 Admin (app-provider) → AcceptBurn choice → Holding + BurnProposal archived
@@ -295,6 +409,7 @@ Result: Tokens removed from supply
 ```
 
 **Verified**: 2025-10-07 (v2.4.0)
+
 - User clicks "🔥 Burn" → BurnProposal created successfully
 - Admin sees proposal in admin panel
 - Admin clicks "🔥 Approve Burn" → Both contracts archived
@@ -305,6 +420,7 @@ Result: Tokens removed from supply
 **Method**: grpcurl via Python script
 
 **Script Template**:
+
 ```python
 import subprocess, base64, json
 
@@ -343,20 +459,24 @@ subprocess.run([
 ## Next Steps
 
 ### Completed ✅
+
 - ~~Fix Burn Race Condition~~ → Implemented ProposeBurn/AcceptBurn pattern (v2.4.0)
 - ~~Test end-to-end burn flow~~ → Verified working on 2025-10-07
 
 ### Priority 1: Testing
+
 - Test cross-participant burn with multiple tokens
 - Verify backward compatibility with v2.2.0 Instruments
 - Load testing with multiple concurrent burn proposals
 
 ### Priority 2: Clean Up
+
 - Remove dead code (CNQuickstartGrpcBalanceService, grpcLedgerService, etc.)
 - Consider implementing RejectBurn choice (currently placeholder)
 - Consider removing Transfer feature if old holdings are permanently hidden
 
 ### Priority 3: Enhancements
+
 - Add burn history/audit log
 - Add batch burn operations
 - Implement burn limits/permissions
@@ -371,6 +491,34 @@ subprocess.run([
 - **JWT Secret**: "unsafe" (Canton LocalNet default)
 
 ## Files Modified (Recent Sessions)
+
+### Automated Wallet Creation (2025-10-13)
+
+1. **Backend Route**: `server/routes/cnQuickstartRoutes.js` (lines 875-987)
+   - Added `POST /api/cn/wallets/create` endpoint
+   - Implements three-step wallet creation:
+     1. Allocate party via JSON Ledger API `POST /v2/parties`
+     2. Grant actAs rights via gRPC `UserManagementService/GrantUserRights`
+     3. Grant readAs rights for admin party (cross-participant access)
+   - Fixed variable shadowing bug (line 946: `let adminParty` instead of `const`)
+
+2. **Frontend UI**: `src/App.jsx` (lines 739-811)
+   - Added "Automated Wallet Creation" section with green styling
+   - Party hint input field for naming wallets
+   - "Create External Wallet" button calling backend API
+   - Alternative "Use Existing Party ID" section for manual entry
+   - Updated onboarding instructions with collapsible Canton console commands
+
+3. **Frontend Service**: `src/services/cnQuickstartFrontendService.js`
+   - Added `createExternalWallet(partyHint)` method
+   - Calls `/api/cn/wallets/create` endpoint
+   - Returns wallet info with partyId, fingerprint, timestamps
+
+4. **Testing Script**: `scripts/create_wallet.sh` (CREATED)
+   - Standalone bash script for testing party allocation
+   - Uses JSON Ledger API + gRPC for complete wallet setup
+   - Can be run independently: `./scripts/create_wallet.sh demo-wallet-1`
+   - Full documentation in `scripts/README.md`
 
 ### Dynamic Party Detection + v1.0.0 Package Deployment (2025-10-12)
 

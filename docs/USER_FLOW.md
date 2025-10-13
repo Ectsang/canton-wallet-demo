@@ -176,71 +176,72 @@ GET /api/cn/init → returns { appProviderParty: "app_provider_quickstart-e-1::1
 
 ---
 
-### Step 7: Create External Wallet (Enable Party on app-user)
+### Step 7: Create External Wallet (Automated) ✨ NEW
 
 **User action:**
 
 1. Enter party hint: `demo-wallet-1` (or any identifier)
 2. Click "Create External Wallet"
 
-**What happens (AUTOMATED via backend):**
+**What happens (FULLY AUTOMATED via backend):**
 
-1. Frontend calls `POST /api/cn/wallets/external` with partyHint
-2. Backend performs FIVE operations:
+1. Frontend calls `POST /api/cn/wallets/create` with partyHint
+2. Backend performs THREE operations:
 
-   a. **Generates Ed25519 key pair** (public + private keys)
-
-   ```javascript
-   const keyPair = await canton.crypto.generateKeyPair('Ed25519');
-   ```
-
-   b. **Enables party on app-user participant** via gRPC:
+   a. **Allocates party via JSON Ledger API:**
 
    ```bash
-   grpcurl -d '{"party_hint": "demo-wallet-1"}' \
-     localhost:2902 \
-     com.digitalasset.canton.admin.participant.v30.PartyManagementService/AllocateParty
+   POST http://localhost:2975/v2/parties
+   {
+     "partyIdHint": "demo-wallet-1",
+     "identityProviderId": ""
+   }
    ```
 
-   Returns: `demo-wallet-1::12203bef03ef28882157f215f074792d8b02a1881cd3e0c0bd505150f67a8712ea21`
+   Returns: `demo-wallet-1::1220857149b7bedd72efd6b51720089b909c682ead71e19290e742a4a2e30f12dd8c`
 
-   c. **Grants JWT user rights** so party can authenticate:
+   b. **Grants actAs rights via gRPC User Management Service:**
 
    ```bash
-   grpcurl -d '{
+   grpcurl -H "Authorization: Bearer $TOKEN" -d '{
      "user_id": "ledger-api-user",
-     "rights": [{
-       "participant_admin": {}
-     }, {
-       "can_act_as": {"party": "demo-wallet-1::1220..."}
-     }]
-   }' localhost:2902 \
-     com.digitalasset.canton.admin.user.v30.UserManagementService/GrantUserRights
+     "rights": [{"can_act_as": {"party": "demo-wallet-1::1220..."}}]
+   }' localhost:2901 \
+     com.daml.ledger.api.v2.admin.UserManagementService/GrantUserRights
    ```
 
-   d. **Stores keys in memory** on backend (Map: partyId → keys)
+   c. **Grants readAs rights for admin party (cross-participant access):**
 
-   ```javascript
-   walletKeys.set(partyId, { publicKey, privateKey });
+   ```bash
+   grpcurl -H "Authorization: Bearer $TOKEN" -d '{
+     "user_id": "ledger-api-user",
+     "rights": [{"can_read_as": {"party": "app_provider_quickstart-e-1::1220..."}}]
+   }' localhost:2901 \
+     com.daml.ledger.api.v2.admin.UserManagementService/GrantUserRights
    ```
 
-   e. **Returns wallet info** to frontend
+   d. **Returns wallet info** to frontend
 
 3. Frontend saves wallet to localStorage
-4. UI shows wallet details (party ID, public key, private key, fingerprint)
+4. UI shows wallet details (party ID, fingerprint)
 
 **User sees:**
 
 ```
-✅ Wallet Details
+✅ External wallet created and saved successfully
+
+Wallet Details
 Party Hint: demo-wallet-1
-Party ID: demo-wallet-1::12203bef03ef28882157f215f074792d8b02a1881cd3e0c0bd505150f67a8712ea21
-Public Key: 3082...
-Private Key: 3082... (Ed25519 private key for signing)
-Fingerprint: 12203bef...
+Party ID: demo-wallet-1::1220857149b7bedd72efd6b51720089b909c682ead71e19290e742a4a2e30f12dd8c
+Public Key: managed-by-canton
+Fingerprint: 1220857149b7...
 ```
 
-**No vetting needed:** Party enabling and JWT rights are sufficient for wallet operations.
+**Benefits:**
+- ✅ No Canton console access required
+- ✅ One click instead of 5+ manual commands
+- ✅ Automatic rights management for cross-participant operations
+- ✅ Works on first startup
 
 ---
 

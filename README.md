@@ -6,20 +6,17 @@ A web application demonstrating **real DAML contract operations** on Canton Netw
 
 ## Features
 
+- **Automated Wallet Creation**: One-click party allocation with automatic rights management  ✨ NEW (2025-10-13)
 - **Real DAML Integration**: Creates actual contracts on Canton ledger via JSON Ledger API v1/v2
 - **Cross-Participant Minting**: Issue and Accept tokens across different participants
 - **Two-Step Minting Flow**:
   - Step 1: Issue choice creates HoldingProposal (proposal to mint)
   - Step 2: Accept choice creates Holding (actual token balance)
-- **Two-Step Burning Flow** ✨ NEW:
-  - Step 1: ProposeBurn choice creates BurnProposal (owner requests burn)
-  - Step 2: AcceptBurn choice completes burn (admin approves and archives)
-- **Admin Panel**: Review and approve pending burn requests ✨ NEW
+- **Immediate Token Burning**: ProposeBurn choice archives Holding immediately (one-step process)
 - **Multi-Token Support**: Create and manage multiple token types with dropdown selector
 - **Balance Queries**: Real-time balance display with breakdown by token symbol
-- **Proposal Management**: View and accept pending HoldingProposals and BurnProposals
+- **Proposal Management**: View and accept pending HoldingProposals
 - **Token Transfer**: Transfer holdings between parties
-- **Party Management**: Canton console integration for wallet setup with actAs/readAs rights
 
 ## Prerequisites
 
@@ -68,43 +65,32 @@ npm run dev
 ### Quick Start
 
 1. **Initialize**: App automatically connects to Canton Network (localhost:3975)
-2. **Setup Wallet**:
-   - Use existing party ID (e.g., `demo-wallet-1::1220...`)
-   - Or create new party via Canton console (see Onboarding section)
+2. **Create Wallet**: Click "Create External Wallet", enter name (e.g., `demo-wallet-1`) → Automatic party allocation ✨ NEW
 3. **Create Token**: Name, symbol, decimals → Creates Instrument contract
 4. **Issue Tokens** (Step 1/2): Select token, enter amount → Creates HoldingProposal
-5. **Accept Proposal** (Step 2/2): Click Accept in Section 4 → Creates Holding
+5. **Accept Proposal** (Step 2/2): Click Accept → Creates Holding
 6. **View Balance**: Real-time balance with breakdown by token symbol
+7. **Burn Tokens**: Click 🔥 Burn → Holding archived immediately
 
 ### UI Sections
 
 1. **Connection Status**: Shows Canton Network connectivity
-2. **Wallet Management**: Create/use external wallet, view party ID
+2. **Wallet Management**: One-click wallet creation or manual party ID entry ✨ NEW
 3. **Token Creation**: Create new tokens or select from existing
-4. **Pending Proposals**: View and accept HoldingProposals
-5. **Admin: Burn Proposals**: Review and approve pending burn requests ✨ NEW
+4. **Token Holdings**: View balance breakdown by token with burn buttons
+5. **Pending Proposals**: View and accept HoldingProposals
 6. **Minting**: Issue tokens (creates proposals)
-7. **Balance Display**: Current balance breakdown by token with burn/transfer buttons
 
-### Cross-Participant Setup
+### Automated vs Manual Wallet Creation
 
-For cross-participant operations (owner on different participant than admin), you need to grant JWT user rights via Canton console:
+**Automated** (Recommended): Click "Create External Wallet" - backend automatically handles:
+- Party allocation via JSON Ledger API
+- actAs rights grant via gRPC
+- readAs rights grant for cross-participant operations
 
-```scala
-// Grant actAs rights for the owner party
-participants.app_user.ledger_api.users.rights.grant(
-  id = "ledger-api-user",
-  actAs = Set(PartyId.tryFromProtoPrimitive("owner-party-id::..."))
-)
+**Manual** (Advanced): Use Canton console for custom setups - see [GETTING_STARTED.md](./docs/GETTING_STARTED.md) for commands.
 
-// Grant readAs rights for the admin party
-participants.app_user.ledger_api.users.rights.grant(
-  id = "ledger-api-user",
-  readAs = Set(PartyId.tryFromProtoPrimitive("app_provider_quickstart-e-1::..."))
-)
-```
-
-See [CONTEXT.md](./CONTEXT.md) for detailed troubleshooting.
+For detailed troubleshooting, see [CONTEXT.md](./CONTEXT.md).
 
 ## Uploading DARs to Canton
 

@@ -876,69 +876,107 @@ export default async function cnQuickstartRoutes(app) {
     try {
       const { partyHint } = req.body;
 
-      app.log.info('Creating external wallet via Canton Console script', { partyHint });
+      app.log.info('Creating external wallet via JSON Ledger API', { partyHint });
 
-      const { promisify } = await import('util');
-      const { writeFile, unlink } = await import('fs/promises');
-      const { exec: execCallback } = await import('child_process');
-      const exec = promisify(execCallback);
-      const path = await import('path');
+      const crypto = await import('crypto');
 
-      // Use the simplified Scala syntax verified by user
-      const scriptContent = `#!/bin/bash
-set -e
-# Access the already-connected Canton console and enable party
-docker exec canton-console bash -c "cat <<'CANTON_SCRIPT' | /app/bin/canton run -c /app/app.conf --no-tty
-val usr = participants.all.find(_.name == \\"app-user\\").get
-val party = usr.parties.enable(\\"${partyHint}\\")
-println(party.toLf)
-sys.exit(0)
-CANTON_SCRIPT
-" 2>&1 | grep -o '${partyHint}::[a-f0-9]*' | head -1
-`;
-      const scriptPath = `/tmp/allocate-${partyHint}-${Date.now()}.sh`;
+      // Generate JWT token for authentication
+      const generateJWT = () => {
+        const header = Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
+        const payload = Buffer.from(JSON.stringify({
+          sub:'ledger-api-user',
+          aud:'https://canton.network.global',
+          exp:Math.floor(Date.now()/1000)+3600,
+          iat:Math.floor(Date.now()/1000)
+        })).toString('base64url');
+        const sig = crypto.createHmac('sha256','unsafe').update(header+'.'+payload).digest('base64url');
+        return header+'.'+payload+'.'+sig;
+      };
 
-      await writeFile(scriptPath, scriptContent, { mode: 0o755 });
+      const token = generateJWT();
 
-      try {
-        app.log.info('Executing Canton console script', { scriptPath });
+      // Step 1: Allocate party via JSON Ledger API on app-user participant (port 2975)
+      app.log.info('Step 1: Allocating party via JSON Ledger API', { partyHint });
 
-        const { stdout, stderr } = await exec(`bash ${scriptPath}`, { timeout: 30000 });
+      const partyResponse = await fetch('http://localhost:2975/v2/parties', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          partyIdHint: partyHint,
+          identityProviderId: ''
+        })
+      });
 
-        app.log.info('Canton console output', { stdout: stdout.trim(), stderr });
-
-        // Parse partyId from output (format: partyHint::fingerprint)
-        const partyId = stdout.trim();
-
-        if (!partyId || !partyId.includes('::')) {
-          throw new Error(`Failed to allocate party - output: "${stdout}"`);
-        }
-
-        const fingerprint = partyId.split('::')[1] || 'unknown';
-
-        const walletInfo = {
-          success: true,
-          partyHint: partyHint,
-          partyId: partyId,
-          publicKey: 'managed-by-canton',
-          fingerprint: fingerprint,
-          createdAt: new Date().toISOString()
-        };
-
-        app.log.info('External wallet created successfully', { partyId });
-
-        return walletInfo;
-      } finally {
-        // Clean up temp script
-        try {
-          await unlink(scriptPath);
-        } catch (e) {
-          app.log.warn('Failed to delete temp script', { scriptPath, error: e.message });
-        }
+      if (!partyResponse.ok) {
+        const errorText = await partyResponse.text();
+        throw new Error(`Failed to allocate party: ${errorText}`);
       }
 
+      const partyData = await partyResponse.json();
+      const partyId = partyData.partyDetails?.party;
+
+      if (!partyId || !partyId.includes('::')) {
+        throw new Error(`Invalid party ID returned: ${JSON.stringify(partyData)}`);
+      }
+
+      app.log.info('Party allocated successfully', { partyId });
+
+      // Step 2: Grant actAs rights via gRPC User Management Service
+      app.log.info('Step 2: Granting actAs rights', { partyId });
+
+      const { execSync } = await import('child_process');
+
+      try {
+        execSync(
+          `grpcurl -plaintext -H "Authorization: Bearer ${token}" -d '{"user_id":"ledger-api-user","rights":[{"can_act_as":{"party":"${partyId}"}}]}' localhost:2901 com.daml.ledger.api.v2.admin.UserManagementService/GrantUserRights`,
+          { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        app.log.info('actAs rights granted successfully');
+      } catch (error) {
+        app.log.warn('Failed to grant actAs rights (may already exist)', { error: error.message });
+      }
+
+      // Step 3: Grant readAs rights for admin party
+      app.log.info('Step 3: Granting readAs rights for admin party');
+
+      const service = getLedgerService();
+      let adminParty = service.getAppProviderParty();
+
+      if (!adminParty) {
+        await service.initialize();
+        adminParty = service.getAppProviderParty();
+      }
+
+      try {
+        execSync(
+          `grpcurl -plaintext -H "Authorization: Bearer ${token}" -d '{"user_id":"ledger-api-user","rights":[{"can_read_as":{"party":"${adminParty}"}}]}' localhost:2901 com.daml.ledger.api.v2.admin.UserManagementService/GrantUserRights`,
+          { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        app.log.info('readAs rights granted successfully for admin party', { adminParty });
+      } catch (error) {
+        app.log.warn('Failed to grant readAs rights (may already exist)', { error: error.message });
+      }
+
+      const fingerprint = partyId.split('::')[1] || 'unknown';
+
+      const walletInfo = {
+        success: true,
+        partyHint: partyHint,
+        partyId: partyId,
+        publicKey: 'managed-by-canton',
+        fingerprint: fingerprint,
+        createdAt: new Date().toISOString()
+      };
+
+      app.log.info('External wallet created successfully', { partyId });
+
+      return walletInfo;
+
     } catch (error) {
-      app.log.error('Failed to create external wallet', { error: error.message });
+      app.log.error('Failed to create external wallet', { error: error.message, stack: error.stack });
       reply.code(400);
       return {
         success: false,

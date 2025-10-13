@@ -61,7 +61,29 @@ Open <http://localhost:5174> in your browser.
 
 ---
 
-## Step 5: Create Wallet via Canton Console
+## Step 5: Create Wallet (Automated - Recommended) ✨ NEW
+
+In the web UI (<http://localhost:5174>):
+
+1. Navigate to "2. Create or Use External Wallet" section
+2. See the green "Automated Wallet Creation" box
+3. Enter a party hint (e.g., `demo-wallet-1`)
+4. Click "Create External Wallet"
+
+**What happens automatically:**
+- Backend allocates party on app-user participant via JSON Ledger API
+- Grants actAs rights for transactions via gRPC
+- Grants readAs rights for admin party (cross-participant) via gRPC
+- Returns complete wallet info to frontend
+- Wallet saved to browser localStorage
+
+**Done!** Your wallet is ready to use immediately.
+
+---
+
+### Alternative: Manual Wallet Creation via Canton Console
+
+For advanced users who want manual control:
 
 ```bash
 docker exec -it canton-console bash
@@ -91,7 +113,7 @@ usr.ledger_api.users.rights.grant(
 )
 ```
 
-Copy the party ID from `println(myWallet.toLf)` output.
+Copy the party ID from `println(myWallet.toLf)` output and paste it in the "Or Use Existing Party ID" section of the UI.
 
 ---
 
@@ -100,7 +122,7 @@ Copy the party ID from `println(myWallet.toLf)` output.
 Follow the UI instructions:
 
 1. **Connection** - Automatic ✅
-2. **Paste Party ID** - From Canton console
+2. **Wallet** - Already created in Step 5 ✅
 3. **Create Token** - Enter name/symbol (creates Instrument contract)
 4. **Mint Tokens** - Two-step process:
    - Click "Issue" → Admin creates proposal
@@ -112,12 +134,14 @@ Follow the UI instructions:
 
 ## What's Happening Behind the Scenes?
 
-### When you create a wallet
+### When you create a wallet (automated) ✨ NEW
 
-- Canton console enables party on app-user participant
-- Grants actAs rights for ledger-api-user (required for transactions)
-- Grants readAs rights for admin party (required for cross-participant)
+- Backend calls JSON Ledger API `POST /v2/parties` to allocate party
+- Backend uses gRPC `UserManagementService/GrantUserRights` to grant actAs rights
+- Backend grants readAs rights for admin party (required for cross-participant)
 - Returns your unique Party ID (format: `hint::fingerprint`)
+- Frontend saves wallet info to localStorage
+- **All automatic - no Canton console needed!**
 
 ### When you create a token
 

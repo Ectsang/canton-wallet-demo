@@ -738,30 +738,76 @@ println(myWalletPartyId.toLf)
 
           {!wallet ? (
             <>
-              <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fff3e0', borderRadius: '4px', borderLeft: '4px solid #ff9800' }}>
-              
+              {/* Automated Wallet Creation (NEW!) */}
+              <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: '#e8f5e9', borderRadius: '4px', borderLeft: '4px solid #4caf50' }}>
+                <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1em', color: '#2e7d32' }}>
+                  ✅ Automated Wallet Creation (Recommended)
+                </h3>
+                <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', lineHeight: '1.5' }}>
+                  Click "Create External Wallet" to automatically:
+                </p>
+                <ul style={{ margin: '0 0 0.5rem 0', paddingLeft: '1.5rem', fontSize: '0.9em', lineHeight: '1.6' }}>
+                  <li>Allocate a party on the app-user participant</li>
+                  <li>Grant actAs rights for transactions</li>
+                  <li>Grant readAs rights for cross-participant operations</li>
+                  <li>Save your wallet to browser localStorage</li>
+                </ul>
+
+                <div className="form-group" style={{ marginTop: '0.75rem', marginBottom: '0.75rem' }}>
+                  <label htmlFor="party-hint">Party Hint (Wallet Name)</label>
+                  <input
+                    id="party-hint"
+                    type="text"
+                    value={partyHint}
+                    onChange={(e) => setPartyHint(e.target.value)}
+                    placeholder="demo-wallet-1"
+                  />
+                  <small style={{ color: '#666', marginTop: '0.25rem', display: 'block' }}>
+                    This will become part of your party ID (e.g., {partyHint}::12203bef...)
+                  </small>
+                </div>
+
+                <button
+                  className="button primary"
+                  onClick={createWallet}
+                  disabled={loading || !partyHint}
+                  style={{ marginTop: '0.5rem' }}
+                >
+                  Create External Wallet
+                  {loading && <span className="loading"></span>}
+                </button>
               </div>
 
-              <div className="form-group">
-                <label htmlFor="manual-party">Paste Party ID from Canton Console</label>
-                <input
-                  id="manual-party"
-                  type="text"
-                  value={manualPartyId}
-                  onChange={(e) => setManualPartyId(e.target.value)}
-                  placeholder="demo-wallet-1::12203bef03ef28882157f215..."
-                />
-                <small style={{ color: '#666', marginTop: '0.25rem', display: 'block' }}>
-                  Enter full party ID (format: party-hint::fingerprint)
-                </small>
+              {/* Manual Party Entry (Alternative) */}
+              <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#f5f5f5', borderRadius: '4px', borderLeft: '4px solid #757575' }}>
+                <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1em', color: '#424242' }}>
+                  🔧 Or Use Existing Party ID
+                </h3>
+                <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85em', lineHeight: '1.5', color: '#666' }}>
+                  If you already created a party via Canton console, paste it here:
+                </p>
+
+                <div className="form-group">
+                  <label htmlFor="manual-party">Party ID</label>
+                  <input
+                    id="manual-party"
+                    type="text"
+                    value={manualPartyId}
+                    onChange={(e) => setManualPartyId(e.target.value)}
+                    placeholder="demo-wallet-1::12203bef03ef28882157f215..."
+                  />
+                  <small style={{ color: '#666', marginTop: '0.25rem', display: 'block' }}>
+                    Format: party-hint::fingerprint
+                  </small>
+                </div>
+                <button
+                  className="button secondary"
+                  onClick={useExistingParty}
+                  disabled={!manualPartyId}
+                >
+                  Use This Party ID
+                </button>
               </div>
-              <button
-                className="button"
-                onClick={useExistingParty}
-                disabled={!manualPartyId}
-              >
-                Use This Party ID
-              </button>
             </>
           ) : (
             <div className="info-box">
