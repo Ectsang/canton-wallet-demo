@@ -9,6 +9,7 @@ Canton Wallet Demo is a web application demonstrating **real DAML contract opera
 ## Key Architecture Decisions
 
 ### Integration Approach
+
 This project has evolved through multiple integration attempts with Canton Network. The current implementation uses **Canton Wallet SDK 0.7.0** with direct JSON Ledger API calls. Key architectural points:
 
 - **Backend-for-Frontend Pattern**: Fastify server (port 8899) acts as BFF, handling Canton SDK operations
@@ -17,7 +18,9 @@ This project has evolved through multiple integration attempts with Canton Netwo
 - **Key Management**: Wallet keys stored in memory (Map) on backend service for transaction signing
 
 ### DAML Contract Architecture
+
 The MinimalToken DAML contract has two templates:
+
 - **Instrument**: Represents token metadata (name, symbol, decimals), created by admin
 - **Holding**: Represents token ownership (owner, instrument reference, amount)
 
@@ -26,21 +29,23 @@ The Issue choice on Instrument creates Holding contracts. The Transfer choice on
 ## Common Development Commands
 
 ### Start Development Environment
+
 ```bash
-# Install dependencies (uses pnpm)
-npm install
+# Install dependencies
+npm install # or pnpm install
 
 # Start backend server (required for Canton SDK integration)
-npm run server:start
+npm run server:start # or pnpm server:start
 
 # Start frontend dev server
-npm run dev
+npm run dev # or pnpm dev
 
-# Access app at http://localhost:5174
+# Access app at http://localhost:5173
 # API docs at http://localhost:8899/docs
 ```
 
 ### Build Commands
+
 ```bash
 # Build frontend for production
 npm run build
@@ -53,6 +58,7 @@ npm run daml:build
 ```
 
 ### Server Management
+
 ```bash
 # Start server with auto-restart
 npm run server:dev
@@ -60,8 +66,8 @@ npm run server:dev
 # Stop server and clean port 8899
 npm run server:stop
 
-# Robust server start (handles port conflicts)
-npm run server:start:robust
+# Restart server 
+npm run server:restart
 ```
 
 ## Canton CN Quickstart Configuration
@@ -69,10 +75,12 @@ npm run server:start:robust
 This demo uses cn-quickstart from `/Users/e/code/sbc/canton/cn-quickstart/quickstart/docker/modules/localnet`.
 
 CN Quickstart exposes multiple participants with port pattern: `[prefix][suffix]`
+
 - Prefix: 2 = app-user, 3 = app-provider, 4 = sv
 - Suffixes: 901 = Ledger API, 902 = Admin API, 975 = JSON API, 903 = Validator Admin
 
 **App Provider Services** (used by this demo):
+
 - **Ledger API**: localhost:3901 (gRPC)
 - **Admin API**: localhost:3902 (gRPC)
 - **JSON API**: localhost:3975 (HTTP) ← Main integration point
@@ -80,6 +88,7 @@ CN Quickstart exposes multiple participants with port pattern: `[prefix][suffix]
 - **UI**: localhost:3000 (HTTP)
 
 **App User Services** (for external wallets):
+
 - **Ledger API**: localhost:2901 (gRPC)
 - **Admin API**: localhost:2902 (gRPC)
 - **JSON API**: localhost:2975 (HTTP)
@@ -88,6 +97,7 @@ CN Quickstart exposes multiple participants with port pattern: `[prefix][suffix]
 ## Critical Implementation Details
 
 ### Wallet Creation Flow (src/services/cantonConsoleService.js:82-140)
+
 1. Generate Ed25519 key pair using SDK's `createKeyPair()`
 2. Call `sdk.topology.prepareSignAndSubmitExternalParty(privateKey, partyHint)`
 3. Store keys in `walletKeys` Map with partyId as key
@@ -96,6 +106,7 @@ CN Quickstart exposes multiple participants with port pattern: `[prefix][suffix]
 **IMPORTANT**: Keys MUST be stored when wallet is created. All subsequent operations require these keys for signing.
 
 ### Contract Creation Flow (src/services/cantonConsoleService.js:473-1202)
+
 1. Set party ID on SDK using `sdk.setPartyId(admin)`
 2. Retrieve wallet keys from `walletKeys` Map
 3. Prepare DAML CreateCommand with templateId and createArguments
@@ -106,6 +117,7 @@ CN Quickstart exposes multiple participants with port pattern: `[prefix][suffix]
 **CRITICAL**: The SDK's `waitForCompletion` may not return contract IDs directly. Multiple fallback strategies are implemented (direct JSON API, activeContracts query, transaction polling).
 
 ### Token Minting Flow (src/services/cantonConsoleService.js:1207-1464)
+
 1. Create ExerciseCommand for Issue choice on Instrument contract
 2. **Use admin keys, not owner keys** - admin exercises Issue choice
 3. Execute and wait for completion (same pattern as contract creation)
@@ -116,6 +128,7 @@ CN Quickstart exposes multiple participants with port pattern: `[prefix][suffix]
 ## Service Layer Architecture
 
 ### Backend Services (server/)
+
 - **index.js**: Fastify server setup with CORS, Swagger, logging
 - **sdkManager.js**: Singleton manager for Canton SDK instance
 - **routes/init.js**: Initialization endpoint
@@ -123,6 +136,7 @@ CN Quickstart exposes multiple participants with port pattern: `[prefix][suffix]
 - **routes/cnQuickstartRoutes.js**: Canton Quickstart integration routes
 
 ### Frontend Services (src/services/)
+
 - **cantonConsoleService.js**: Main Canton SDK integration (backend-only, not used in browser)
 - **cnQuickstartFrontendService.js**: Frontend service calling backend API
 - **frontendCantonService.js**: Alternative frontend service
@@ -132,6 +146,7 @@ CN Quickstart exposes multiple participants with port pattern: `[prefix][suffix]
 ## State Management
 
 The app uses localStorage to persist:
+
 - **Wallet data**: partyId, keys, partyHint, creation timestamp
 - **Token data**: contractId, name, symbol, decimals, admin party
 
@@ -140,6 +155,7 @@ This allows recovery after page refresh. See src/services/storageService.js for 
 ## Error Handling Patterns
 
 Canton SDK operations can fail in multiple ways:
+
 1. **Network errors**: LocalNet not running or wrong ports
 2. **SDK errors**: Missing party ID, invalid keys, timeout
 3. **DAML errors**: Invalid contract arguments, insufficient permissions
@@ -150,6 +166,7 @@ Always implement fallback strategies when extracting contract IDs from completio
 ## Code Style Conventions
 
 From .cursorrules:
+
 - Use ES6+ features and modern React patterns (hooks, functional components)
 - Prefer const over let, avoid var
 - Use async/await over promises
@@ -161,11 +178,13 @@ From .cursorrules:
 ## Known Limitations and Workarounds
 
 ### SDK Limitations
+
 - SDK's `waitForCompletion` doesn't always return contract IDs in createdEvents
 - Some SDK methods have security restrictions requiring direct API calls
 - Token Standard API (`sdk.tokenStandard`) doesn't support custom DAML contracts
 
 ### Workarounds Implemented
+
 1. **Direct JSON Ledger API calls**: Bypass SDK restrictions for contract queries
 2. **Multiple fallback strategies**: Try 5+ methods to extract contract IDs
 3. **Active contracts polling**: Query ledger to find recently created contracts
@@ -174,6 +193,7 @@ From .cursorrules:
 ## Testing Strategy
 
 **Note**: No test files currently exist in the repository, but the PRD (docs/PRD.md) describes intended test coverage:
+
 - Unit tests for service layer and utilities
 - Integration tests for end-to-end workflows
 - Mock mode for browser-safe testing without LocalNet
@@ -185,7 +205,6 @@ From .cursorrules:
 - **server/index.js**: Backend server setup
 - **src/App.jsx**: React app with wallet/token UI
 - **daml/minimal-token/daml/MinimalToken.daml**: DAML contract templates
-- **docs/PRD.md**: Comprehensive product requirements and technical specs
 - **.cursorrules**: Project conventions and patterns
 
 ## Package Manager

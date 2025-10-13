@@ -72,9 +72,7 @@ Follow the UI instructions:
    - Click "Issue" → Admin creates proposal
    - Click "Accept" → You receive tokens
 5. **View Balance** - See your holdings
-6. **Burn Tokens** - Two-step process:
-   - Click 🔥 Burn → You propose burn
-   - Admin approves in "Admin: Burn Proposals" section
+6. **Burn Tokens** - Click 🔥 Burn → Holding archived immediately
 
 ---
 
@@ -101,9 +99,9 @@ Follow the UI instructions:
 
 ### When you burn tokens
 
-- **Step 1 (ProposeBurn):** You propose to burn a Holding
-- **Step 2 (AcceptBurn):** Admin approves, archives both contracts
-- Why 2 steps? Holding has dual signatories (admin + you)
+- **ProposeBurn (consuming choice):** Archives the Holding immediately
+- Creates BurnProposal as audit trail (Holding is already gone)
+- One-step process: Owner clicks burn → Holding archived
 
 ---
 

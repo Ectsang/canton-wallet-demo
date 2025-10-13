@@ -262,25 +262,6 @@ The script preserves all previous versions in the config, so old contracts remai
 - `src/services/cnQuickstartLedgerService.js` - Commands use currentPackageId
 - `server/services/jsonApiV1Service.js` - Queries use all versions
 
-## Current Deployment
-
-- **Version:** 1.0.0
-- **Package ID:** `1bf66b0c9774ca1de9a075c810b443c2fe3638c59c07da7c8034b04650e3352e`
-- **Uploaded:** 2025-10-12
-- **Status:** ✅ Active
-- **Party Discovery:** ✅ Automatic
-
-## Package ID Reference
-
-For reference, here are the package IDs used in this project:
-
-- **v1.0.0** (current): `1bf66b0c9774ca1de9a075c810b443c2fe3638c59c07da7c8034b04650e3352e`
-- **v2.4.0**: `bc5800fb102ebab939780f60725fc87c5c0f93c947969c8b2fc2bb4f87d471de`
-- **v2.2.0**: `c90d4ebea4593e9f5bcb46291cd4ad5fef08d94cb407a02085b30d92539383ae`
-- **v2.1.0**: `c598823710328ed7b6b46a519df06f200a6c49de424b0005c4a6091f8667586d`
-- **v2.0.1**: `2399d6f39edcb9611b116cfc6e5b722b65b487cbb71e13a300753e39268f3118`
-- **v2.0.0**: `eccbf7c592fcae3e2820c25b57b4c76a434f0add06378f97a01810ec4ccda4de`
-
 ## Related Files
 
 - `scripts/upload_dar.sh` - Shell upload script (recommended, auto-detects version)

@@ -503,9 +503,7 @@ Breakdown by Token:
 
 ---
 
-### Step 11: Burn Tokens (Two-Step Flow)
-
-#### Step 11a: Propose Burn (Create BurnProposal)
+### Step 11: Burn Tokens (One-Step)
 
 **User action:**
 
@@ -535,85 +533,49 @@ Breakdown by Token:
    }
    ```
 
-3. Canton creates **BurnProposal contract**:
+3. **Canton immediately archives the Holding** because ProposeBurn is a **consuming choice**:
+
+   ```daml
+   choice ProposeBurn : ContractId BurnProposal
+     controller owner
+     do
+       -- This choice is consuming (archives self automatically)
+       create BurnProposal with admin, owner, holding = self
+   ```
+
+4. Canton also creates a **BurnProposal contract** as an audit trail:
 
    ```daml
    template BurnProposal
      with
        admin   : Party
        owner   : Party
-       holding : ContractId Holding
+       holding : ContractId Holding  -- Reference to archived Holding
      where
-       signatory owner  -- Owner creates it
+       signatory owner  -- Owner created it
        observer admin   -- Admin can see it
    ```
 
-4. Backend returns success
-5. Frontend shows success message
+5. Backend returns success
+6. Frontend reloads balance (Holding is gone)
 
 **User sees:**
 
 ```
-🔥 Burn proposal created for 1000 DEMO tokens! Waiting for admin to accept...
-```
-
-**Why two steps?**
-
-- Holding has **two signatories**: admin and owner (on different participants)
-- Direct burn would fail with CONTRACT_NOT_ACTIVE
-- Solution: Owner proposes → Admin accepts
-
----
-
-#### Step 11b: Accept Burn (Archive Holding)
-
-**User action (acting as admin):**
-
-1. Admin sees "🔥 Admin: Burn Proposals" panel appear
-2. Click "🔥 Approve Burn"
-
-**What happens (AUTOMATED):**
-
-1. Frontend calls `POST /api/cn/burn-proposals/accept`
-2. Backend exercises **AcceptBurn choice** on BurnProposal:
-
-   ```javascript
-   // Admin exercises AcceptBurn on THEIR participant (app-provider)
-   POST http://localhost:3975/v2/commands/submit-and-wait-for-transaction
-   {
-     "commands": {
-       "actAs": ["app_provider_quickstart-e-1::1220..."],  // Admin acts
-       "commands": [{
-         "ExerciseCommand": {
-           "templateId": "1bf66b0c....:MinimalToken:BurnProposal",
-           "contractId": "00b3e7a1f5c2...",  // BurnProposal ID
-           "choice": "AcceptBurn",
-           "choiceArgument": {}
-         }
-       }]
-     }
-   }
-   ```
-
-   **Important:** Request goes to **localhost:3975** (app-provider) where admin is
-
-3. Canton **archives BOTH contracts**:
-   - BurnProposal (consumed by AcceptBurn)
-   - Holding (exercised via `exercise holding Archive`)
-
-4. Frontend waits 1 second for Canton to process archives
-5. Reloads balance and burn proposals
-
-**User sees:**
-
-```
-✅ Burn approved! Holding has been burned.
+🔥 Tokens burned! 1000 DEMO removed from ledger.
 
 Your Token Holdings
 Total Balance: 0 tokens
 ```
 
-**Result:** Tokens are permanently removed from the ledger (Holding archived).
+**Why only one step?**
+
+- **ProposeBurn is a consuming choice** - it archives the Holding when exercised
+- The owner controls the Holding (as controller), so they can burn it directly
+- Even though admin is a signatory, the owner's controller authority is sufficient
+- BurnProposal exists only as an **audit record** that a burn occurred
+
+**Result:** Tokens are permanently removed from the ledger (Holding archived immediately).
 
 ---
 
@@ -638,10 +600,9 @@ Total Balance: 0 tokens
 4. ⚙️ Start frontend (`npm run dev`)
 5. 🖱️ Click "Create External Wallet"
 6. 🖱️ Click "Create Token"
-7. 🖱️ Click "Issue Tokens" (Step 1)
-8. 🖱️ Click "Accept Proposal" (Step 2)
-9. 🖱️ Click "🔥 Burn" (propose)
-10. 🖱️ Click "🔥 Approve Burn" (accept as admin)
+7. 🖱️ Click "Issue Tokens" (Step 1 of minting)
+8. 🖱️ Click "Accept Proposal" (Step 2 of minting)
+9. 🖱️ Click "🔥 Burn" (archives Holding immediately)
 
 ---
 
@@ -652,7 +613,7 @@ Total Balance: 0 tokens
 ```
 party-hint::fingerprint
 demo-wallet-1::12203bef03ef28882157f215f074792d8b02a1881cd3e0c0bd505150f67a8712ea21
-└─────┬─────┘ └──────────────────────────────┬─────────────────────────────────┘
+└─────┬─────┘  └──────────────────────────────┬───────────────────────────────────┘
    Hint                          Canton-generated hash (changes on restart)
 ```
 
