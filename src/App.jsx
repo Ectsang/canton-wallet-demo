@@ -1009,119 +1009,10 @@ participants.app_user.ledger_api.users.rights.grant(
         </div>
       )}
 
-      {/* Pending Proposals Section */}
-      {wallet && (
-        <div className="card">
-          <h2>4. Your Pending Proposals</h2>
-
-          <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fff3cd', borderRadius: '4px', borderLeft: '4px solid #ffa726' }}>
-            <p style={{ margin: 0, fontSize: '0.9em', lineHeight: '1.5' }}>
-              ⏳ <strong>HoldingProposals</strong> appear here after admin issues tokens. Accept them to receive tokens in your wallet.
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <p style={{ margin: 0, color: '#666' }}>
-              Proposals are token minting requests that need your approval
-            </p>
-            <button
-              className="button secondary"
-              onClick={loadProposals}
-              disabled={loading}
-              style={{ padding: '0.5rem 1rem' }}
-            >
-              🔄 Refresh
-              {loading && <span className="loading"></span>}
-            </button>
-          </div>
-
-          {allProposals.length === 0 ? (
-            <div className="info-box">
-              <p>No pending proposals. Create a token and mint some to see proposals here.</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {allProposals.map((proposal, index) => (
-                <div key={proposal.proposalId} className="info-box" style={{ backgroundColor: '#fff3cd', position: 'relative' }}>
-                  <div style={{ position: 'absolute', top: '1rem', right: '1rem', fontSize: '1.5rem' }}>
-                    ⏳
-                  </div>
-                  <h3 style={{ marginTop: 0 }}>Proposal #{index + 1}</h3>
-
-                  <div className="wallet-detail">
-                    <strong>Amount:</strong> {proposal.amount} {(() => {
-                      const token = allTokens.find(t => t.contractId === proposal.instrument);
-                      return token ? token.symbol : '';
-                    })()}
-                  </div>
-
-                  <div className="wallet-detail">
-                    <strong>Instrument ID:</strong>
-                    <div className="copyable-field">
-                      <code style={{ fontSize: '0.85em' }}>{proposal.instrument.substring(0, 40)}...</code>
-                      <button
-                        className="copy-btn"
-                        onClick={() => copyToClipboard(proposal.instrument, 'Instrument ID')}
-                        title="Copy Instrument ID"
-                      >
-                        📋
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="wallet-detail">
-                    <strong>Proposal ID:</strong>
-                    <div className="copyable-field">
-                      <code style={{ fontSize: '0.85em' }}>{proposal.proposalId.substring(0, 40)}...</code>
-                      <button
-                        className="copy-btn"
-                        onClick={() => copyToClipboard(proposal.proposalId, 'Proposal ID')}
-                        title="Copy Proposal ID"
-                      >
-                        📋
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="wallet-detail">
-                    <strong>From Admin:</strong>
-                    <code style={{ fontSize: '0.75em', wordBreak: 'break-all' }}>{proposal.admin.substring(0, 50)}...</code>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                    <button
-                      className="button primary"
-                      onClick={() => acceptSpecificProposal(proposal)}
-                      disabled={loading}
-                      style={{ flex: 1 }}
-                    >
-                      ✅ Accept & Mint Tokens
-                      {loading && <span className="loading"></span>}
-                    </button>
-                    <button
-                      className="button secondary"
-                      onClick={() => {
-                        // TODO: Implement reject functionality
-                        alert('Reject functionality coming soon! For now, proposals remain until accepted.');
-                      }}
-                      disabled={loading}
-                      style={{ flex: 1 }}
-                    >
-                      ❌ Reject
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-
       {/* Token Balance & Holdings - Show whenever wallet is connected */}
       {wallet && (
         <div className="card">
-          <h2>5. Your Token Holdings</h2>
+          <h2>4. Your Token Holdings</h2>
 
           {/* Explanation for burn */}
           {tokenBalance > 0 && (
@@ -1247,7 +1138,7 @@ participants.app_user.ledger_api.users.rights.grant(
       {/* Token Minting - Two Step Flow */}
       {createdToken && (
         <div className="card">
-          <h2>6. Mint Tokens (Two-Step Flow)</h2>
+          <h2>5. Mint Tokens (Two-Step Flow)</h2>
 
           {/* Explanation Box */}
           <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: '#fff3e0', borderRadius: '4px', borderLeft: '4px solid #ff9800' }}>
