@@ -73,10 +73,40 @@ class CNQuickstartLedgerService {
     }
 
     try {
-      console.log('🔄 Fetching App Provider party from Canton logs...');
+      console.log('🔄 Fetching App Provider party ID from Canton Ledger API...');
 
-      // Option 1: Try to get from Canton logs via shell command
-      // This is the most reliable method for LocalNet
+      // Option 1: Query Canton Ledger API via gRPC (MOST RELIABLE)
+      // Uses PartyManagementService.ListKnownParties - works on first startup
+      try {
+        const { execSync } = await import('child_process');
+
+        // Generate JWT for authentication
+        const token = this.generateJWT('ledger-api-user');
+
+        // Call ListKnownParties via grpcurl
+        const result = execSync(
+          `grpcurl -plaintext -H "Authorization: Bearer ${token}" -d '{}' localhost:3901 com.daml.ledger.api.v2.admin.PartyManagementService/ListKnownParties 2>/dev/null | grep -A 1 '"party": "app_provider_quickstart' | grep '"party"' | sed 's/.*"party": "\\([^"]*\\)".*/\\1/' | head -1`,
+          { encoding: 'utf-8', timeout: 10000, shell: '/bin/bash' }
+        ).trim();
+
+        if (result && result.startsWith('app_provider_quickstart')) {
+          this.appProviderParty = result;
+          console.log('✅ Found App Provider party via Ledger API:', this.appProviderParty);
+          return;
+        }
+      } catch (apiError) {
+        console.log('⚠️  Could not query Ledger API, trying environment variable...');
+        console.log('   Error:', apiError.message);
+      }
+
+      // Option 2: Use environment variable
+      if (process.env.APP_PROVIDER_PARTY) {
+        this.appProviderParty = process.env.APP_PROVIDER_PARTY;
+        console.log('✅ Using APP_PROVIDER_PARTY from env:', this.appProviderParty);
+        return;
+      }
+
+      // Option 3: Try Docker logs as fallback (less reliable)
       try {
         const { execSync } = await import('child_process');
         const result = execSync(
@@ -86,46 +116,20 @@ class CNQuickstartLedgerService {
 
         if (result && result.startsWith('app_provider_quickstart-e-1::')) {
           this.appProviderParty = result;
-          console.log('✅ Found App Provider party from logs:', this.appProviderParty);
+          console.log('✅ Found App Provider party from Docker logs (fallback):', this.appProviderParty);
           return;
         }
       } catch (logError) {
-        console.log('⚠️  Could not extract from logs, trying API...');
+        console.log('⚠️  Docker logs not available');
       }
 
-      // Option 2: Try CN Quickstart backend API (requires auth)
-      try {
-        const backendResponse = await fetch('http://localhost:8080/admin/tenant-registrations', {
-          headers: {
-            'Accept': 'application/json'
-          }
-        });
-
-        if (backendResponse.ok) {
-          const data = await backendResponse.json();
-          if (Array.isArray(data) && data.length > 0) {
-            this.appProviderParty = data[0].party;
-            console.log('✅ Got App Provider party from backend:', this.appProviderParty);
-            return;
-          }
-        }
-      } catch (backendError) {
-        console.log('⚠️  Backend API not available, trying environment variable...');
-      }
-
-      // Option 3: Use environment variable
-      if (process.env.APP_PROVIDER_PARTY) {
-        this.appProviderParty = process.env.APP_PROVIDER_PARTY;
-        console.log('✅ Using APP_PROVIDER_PARTY from env:', this.appProviderParty);
-        return;
-      }
-
-      // Option 4: Extract from Canton logs (last resort)
+      // No methods worked
       console.error('❌ Could not determine App Provider party automatically');
       throw new Error(
         'Could not determine App Provider party. Please:\n' +
         '1. Set APP_PROVIDER_PARTY environment variable, OR\n' +
-        '2. Check Canton logs: docker logs canton 2>&1 | grep "app_provider_quickstart-e-1::" | tail -1'
+        '2. Ensure Canton LocalNet is running (check: grpcurl -plaintext localhost:3901 list), OR\n' +
+        '3. Run: bash scripts/get_app_provider_party.sh'
       );
 
     } catch (error) {
