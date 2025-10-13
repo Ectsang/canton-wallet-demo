@@ -61,12 +61,46 @@ Open <http://localhost:5174> in your browser.
 
 ---
 
-## Step 5: Use the Demo
+## Step 5: Create Wallet via Canton Console
+
+```bash
+docker exec -it canton-console bash
+```
+
+Then run in the Canton console:
+
+```scala
+val usr = participants.all.find(_.name == "app-user").get
+val appProvider = participants.all.find(_.name == "app-provider").get
+
+// Enable party and get the party ID
+val myWallet = usr.parties.enable("demo-wallet-1")
+println(myWallet.toLf)
+
+// Grant actAs rights (REQUIRED for transactions!)
+usr.ledger_api.users.rights.grant(
+  id = "ledger-api-user",
+  actAs = Set(myWallet)
+)
+
+// Grant readAs for admin party (REQUIRED for cross-participant operations)
+val adminPartyId = appProvider.parties.list().head.toLf
+usr.ledger_api.users.rights.grant(
+  id = "ledger-api-user",
+  readAs = Set(PartyId.tryFromProtoPrimitive(adminPartyId))
+)
+```
+
+Copy the party ID from `println(myWallet.toLf)` output.
+
+---
+
+## Step 6: Use the Demo
 
 Follow the UI instructions:
 
 1. **Connection** - Automatic ✅
-2. **Create Wallet** - Click button (backend enables party + generates keys)
+2. **Paste Party ID** - From Canton console
 3. **Create Token** - Enter name/symbol (creates Instrument contract)
 4. **Mint Tokens** - Two-step process:
    - Click "Issue" → Admin creates proposal
@@ -80,10 +114,10 @@ Follow the UI instructions:
 
 ### When you create a wallet
 
-- Backend generates Ed25519 key pair
-- Enables party on Canton's app-user participant
-- Grants JWT authentication rights
-- Returns your unique Party ID
+- Canton console enables party on app-user participant
+- Grants actAs rights for ledger-api-user (required for transactions)
+- Grants readAs rights for admin party (required for cross-participant)
+- Returns your unique Party ID (format: `hint::fingerprint`)
 
 ### When you create a token
 

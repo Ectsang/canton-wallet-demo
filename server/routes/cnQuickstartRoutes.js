@@ -878,19 +878,25 @@ export default async function cnQuickstartRoutes(app) {
 
       app.log.info('Creating external wallet via Canton Console script', { partyHint });
 
-      const { promisify } = require('util');
-      const { writeFile, unlink } = require('fs').promises;
-      const exec = promisify(require('child_process').exec);
-      const path = require('path');
+      const { promisify } = await import('util');
+      const { writeFile, unlink } = await import('fs/promises');
+      const { exec: execCallback } = await import('child_process');
+      const exec = promisify(execCallback);
+      const path = await import('path');
 
-      // Create temp script file
-      const scriptPath = `/tmp/allocate-${partyHint}-${Date.now()}.sh`;
+      // Use the simplified Scala syntax verified by user
       const scriptContent = `#!/bin/bash
 set -e
-docker exec canton-console bash -c "echo 'val party = participants.app_user.parties.enable(\\"${partyHint}\\")
-println(party.party.toLf)
-sys.exit(0)' | /app/bin/canton daemon -c /app/app.conf --auto-connect-local --bootstrap /dev/stdin 2>&1" | grep '^${partyHint}::' | head -1
+# Access the already-connected Canton console and enable party
+docker exec canton-console bash -c "cat <<'CANTON_SCRIPT' | /app/bin/canton run -c /app/app.conf --no-tty
+val usr = participants.all.find(_.name == \\"app-user\\").get
+val party = usr.parties.enable(\\"${partyHint}\\")
+println(party.toLf)
+sys.exit(0)
+CANTON_SCRIPT
+" 2>&1 | grep -o '${partyHint}::[a-f0-9]*' | head -1
 `;
+      const scriptPath = `/tmp/allocate-${partyHint}-${Date.now()}.sh`;
 
       await writeFile(scriptPath, scriptContent, { mode: 0o755 });
 

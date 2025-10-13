@@ -19,7 +19,7 @@ function App() {
   // Wallet state
   const [wallet, setWallet] = useState(null);
   const [partyHint, setPartyHint] = useState('demo-wallet-1');
-  const [manualPartyId, setManualPartyId] = useState('demo-wallet-1::12203bef03ef28882157f215f074792d8b02a1881cd3e0c0bd505150f67a8712ea21');
+  const [manualPartyId, setManualPartyId] = useState('');
   const [showOnboardingInstructions, setShowOnboardingInstructions] = useState(false);
   
   // Token state
@@ -622,9 +622,6 @@ function App() {
           <li><strong>View Holdings</strong> - See your token balance (queries real Canton contracts)</li>
           <li><strong>Burn Tokens</strong> - Click 🔥 Burn to immediately remove tokens (reduces supply)</li>
         </ol>
-        <p style={{ margin: '1rem 0 0 0', fontSize: '0.85em', color: '#555', lineHeight: '1.5' }}>
-          💡 <strong>Everything is real</strong> - contracts are created on Canton, not mocked. All operations use Canton's JSON Ledger API.
-        </p>
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -660,19 +657,19 @@ function App() {
           {/* Simple Instructions */}
           <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: '#e3f2fd', borderRadius: '4px', borderLeft: '4px solid #2196F3' }}>
             <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1em', color: '#1976d2' }}>
-              💡 What happens when you create a wallet?
+              💡 How to create a wallet
             </h3>
             <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', lineHeight: '1.5' }}>
-              The backend automatically:
+              Use the Canton console (shown below) to:
             </p>
             <ul style={{ margin: '0 0 0.5rem 0', paddingLeft: '1.5rem', fontSize: '0.9em', lineHeight: '1.6' }}>
-              <li>Generates Ed25519 key pair (public + private keys)</li>
-              <li>Enables your party on Canton's app-user participant</li>
-              <li>Grants authentication rights for transactions</li>
-              <li>Returns your unique Party ID (format: <code>hint::fingerprint</code>)</li>
+              <li>Enable a party on the app-user participant</li>
+              <li>Grant actAs rights for transactions</li>
+              <li>Grant readAs rights for the admin party (cross-participant)</li>
+              <li>Get your unique Party ID (format: <code>hint::fingerprint</code>)</li>
             </ul>
             <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', color: '#666' }}>
-              💾 Your wallet is saved in browser localStorage and can be reused until Canton restarts.
+              💾 Paste the party ID below - it will be saved in browser localStorage.
             </p>
 
             <button
@@ -708,17 +705,30 @@ function App() {
                   overflow: 'auto',
                   fontSize: '0.8em',
                   margin: 0
-                }}>{`# Connect to Canton LocalNet
-docker exec -it canton bash
+                }}>{`# Connect to Canton Console (from cn-quickstart/quickstart, run \`make canton-console\`)
 
-# Enable party on app-user
-participants.app_user.parties.enable("demo-wallet-1")
+# In the Canton console, run:
+val usr = participants.all.find(_.name == "app-user").get
+val appProvider = participants.all.find(_.name == "app-provider").get
 
-# Grant JWT rights (replace party ID)
-participants.app_user.ledger_api.users.rights.grant(
+# Create your wallet with a party hint (e.g. demo-wallet-1) and get its party ID
+val myWalletPartyId = usr.parties.enable("demo-wallet-1")
+
+# Get the admin party ID (first party in the list)
+val adminPartyId = appProvider.parties.list().head.party.toLf
+
+# Grant rights to the party:
+#   - actAs rights (REQUIRED for transactions!),
+#   - readAs for admin party (REQUIRED for cross-participant operations)
+usr.ledger_api.users.rights.grant(
   id = "ledger-api-user",
-  actAs = Set(PartyId.tryFromProtoPrimitive("demo-wallet-1::1220..."))
-)`}</pre>
+  actAs = Set(myWalletPartyId),
+  readAs = Set(PartyId.tryFromProtoPrimitive(adminPartyId))
+)
+
+# Copy the full party ID from the output and paste it in "Use Existing Party ID" below:
+println(myWalletPartyId.toLf)
+`}</pre>
                 <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', color: '#666' }}>
                   Then paste your party ID in "Use Existing Party ID" below.
                 </p>
@@ -728,29 +738,12 @@ participants.app_user.ledger_api.users.rights.grant(
 
           {!wallet ? (
             <>
-              <div className="form-group">
-                <label htmlFor="party-hint">Party Hint (optional identifier)</label>
-                <input
-                  id="party-hint"
-                  type="text"
-                  value={partyHint}
-                  onChange={(e) => setPartyHint(e.target.value)}
-                  placeholder="my-wallet-1"
-                />
+              <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fff3e0', borderRadius: '4px', borderLeft: '4px solid #ff9800' }}>
+              
               </div>
-              <button
-                className="button"
-                onClick={createWallet}
-                disabled={loading}
-              >
-                Create External Wallet
-                {loading && <span className="loading"></span>}
-              </button>
-
-              <div style={{ margin: '1rem 0', textAlign: 'center', color: '#666' }}>— OR —</div>
 
               <div className="form-group">
-                <label htmlFor="manual-party">Use Existing Party ID</label>
+                <label htmlFor="manual-party">Paste Party ID from Canton Console</label>
                 <input
                   id="manual-party"
                   type="text"
@@ -763,11 +756,11 @@ participants.app_user.ledger_api.users.rights.grant(
                 </small>
               </div>
               <button
-                className="button secondary"
+                className="button"
                 onClick={useExistingParty}
                 disabled={!manualPartyId}
               >
-                Use Existing Party
+                Use This Party ID
               </button>
             </>
           ) : (
